@@ -1,6 +1,6 @@
 # Webentwicklungsumgebung einrichten (Windows / PowerShell)
 
-Anleitung zum Aufsetzen einer modernen Web-Dev-Umgebung mit Node.js, Bun, Git und den wichtigsten Tools. Ausgelegt für Windows mit PowerShell.
+Anleitung zum Aufsetzen einer modernen Web-Dev-Umgebung mit Node.js, Bun, Git und den wichtigsten Tools.
 
 ---
 
