@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Devion Stack Docs</title>
+<style>
+  :root {
+    --bg: #09090b;
+    --bg-elevated: #0f0f12;
+    --bg-code: #131316;
+    --border: #26262b;
+    --border-soft: #1c1c20;
+    --text: #e4e4e7;
+    --text-dim: #a1a1aa;
+    --text-faint: #6b6b74;
+    --accent: #34d399;
+    --accent-dim: #1a5c45;
+    --accent-soft: rgba(52, 211, 153, 0.1);
+    --tag-runtime: #60a5fa;
+    --tag-backend: #f472b6;
+    --tag-data: #34d399;
+    --tag-state: #fbbf24;
+    --tag-forms: #a78bfa;
+    --tag-ui: #38bdf8;
+    --tag-db: #fb923c;
+    --tag-tooling: #94a3b8;
+    --tag-infra: #f87171;
+    --mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  /* ---------- Layout ---------- */
+  .shell {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: 100vh;
+  }
+
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .sidebar.open { display: block; }
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-soft);
+    background: var(--bg-elevated);
+    padding: 24px 16px 40px;
+  }
+
+  .sidebar::-webkit-scrollbar { width: 6px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0 10px 20px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .brand-mark {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+
+  .brand-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  .nav-group {
+    margin-bottom: 22px;
+  }
+
+  .nav-group-title {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    padding: 0 10px;
+    margin-bottom: 6px;
+  }
+
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13.5px;
+    color: var(--text-dim);
+    transition: background 0.12s, color 0.12s;
+  }
+
+  .nav-link:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+
+  .nav-link.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .nav-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: var(--text-faint);
+  }
+
+  .nav-link.active .nav-dot { background: var(--accent); }
+
+  /* ---------- Main ---------- */
+  .main { padding: 48px 56px 120px; max-width: 880px; }
+
+  @media (max-width: 900px) {
+    .main { padding: 32px 20px 80px; }
+  }
+
+  .mobile-bar {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-soft);
+    padding: 14px 18px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  @media (max-width: 900px) {
+    .mobile-bar { display: block; }
+  }
+
+  .hero {
+    margin-bottom: 56px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    margin-bottom: 14px;
+  }
+
+  .hero h1 {
+    font-size: 34px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+  }
+
+  .hero p {
+    color: var(--text-dim);
+    font-size: 15.5px;
+    max-width: 60ch;
+    margin: 0 0 20px;
+  }
+
+  .hero-meta {
+    display: flex;
+    gap: 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-faint);
+  }
+
+  .hero-meta span { color: var(--text-dim); }
+
+  /* ---------- Sections ---------- */
+  .lib-section {
+    margin-bottom: 64px;
+    scroll-margin-top: 24px;
+  }
+
+  .lib-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 6px;
+  }
+
+  .lib-title {
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .lib-tagline {
+    color: var(--text-dim);
+    font-size: 14.5px;
+    margin: 6px 0 20px;
+    max-width: 65ch;
+  }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .tag-runtime { color: var(--tag-runtime); background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.2); }
+  .tag-backend { color: var(--tag-backend); background: rgba(244,114,182,0.1); border-color: rgba(244,114,182,0.2); }
+  .tag-data { color: var(--tag-data); background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.2); }
+  .tag-state { color: var(--tag-state); background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.2); }
+  .tag-forms { color: var(--tag-forms); background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.2); }
+  .tag-ui { color: var(--tag-ui); background: rgba(56,189,248,0.1); border-color: rgba(56,189,248,0.2); }
+  .tag-db { color: var(--tag-db); background: rgba(251,146,60,0.1); border-color: rgba(251,146,60,0.2); }
+  .tag-tooling { color: var(--tag-tooling); background: rgba(148,163,184,0.1); border-color: rgba(148,163,184,0.2); }
+  .tag-infra { color: var(--tag-infra); background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.2); }
+
+  .lib-block {
+    margin: 18px 0;
+  }
+
+  .lib-block h4 {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    margin: 0 0 10px;
+  }
+
+  .lib-block p {
+    margin: 0 0 10px;
+    color: var(--text-dim);
+    font-size: 14.5px;
+  }
+
+  .why-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .why-list li {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 7px;
+    font-size: 14.5px;
+    color: var(--text-dim);
+  }
+
+  .why-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 9px;
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 0 0 4px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 12.8px;
+    line-height: 1.6;
+  }
+
+  .inline-code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+
+  .code-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  .cm { color: #6b6b74; }
+  .kw { color: #f472b6; }
+  .st { color: #34d399; }
+  .fn { color: #60a5fa; }
+  .pr { color: #fbbf24; }
+  .ty { color: #a78bfa; }
+
+  .install-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .install-row pre {
+    flex: 1;
+    padding: 10px 14px;
+    margin: 0;
+  }
+
+  .docs-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    border: 1px solid var(--accent-dim);
+    padding: 5px 10px;
+    border-radius: 6px;
+    margin-top: 4px;
+  }
+
+  .docs-link:hover { background: var(--accent-soft); }
+
+  .divider {
+    height: 1px;
+    background: var(--border-soft);
+    margin: 40px 0 0;
+  }
+
+  .callout {
+    border-left: 2px solid var(--accent);
+    background: rgba(52,211,153,0.05);
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    font-size: 14px;
+    color: var(--text-dim);
+    margin: 14px 0;
+  }
+
+  .callout strong { color: var(--text); }
+
+  .callout.warn {
+    border-left-color: var(--tag-infra);
+    background: rgba(248,113,113,0.06);
+  }
+
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-soft);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="mobile-bar">devion // stack-docs</div>
+
+<div class="shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">devion</span>
+      <span class="brand-sub">/stack-docs</span>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Runtime &amp; Sprache</div>
+      <a class="nav-link" href="#bun"><span class="nav-dot"></span>Bun</a>
+      <a class="nav-link" href="#typescript"><span class="nav-dot"></span>TypeScript</a>
+      <a class="nav-link" href="#nextjs"><span class="nav-dot"></span>Next.js</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">API-Kommunikation</div>
+      <a class="nav-link" href="#hono-rpc"><span class="nav-dot"></span>Hono RPC</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Data &amp; State</div>
+      <a class="nav-link" href="#tanstack-query"><span class="nav-dot"></span>TanStack Query</a>
+      <a class="nav-link" href="#tanstack-table"><span class="nav-dot"></span>TanStack Table</a>
+      <a class="nav-link" href="#zustand"><span class="nav-dot"></span>Zustand</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Formulare</div>
+      <a class="nav-link" href="#rhf"><span class="nav-dot"></span>React Hook Form</a>
+      <a class="nav-link" href="#zod"><span class="nav-dot"></span>Zod</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">UI &amp; Styling</div>
+      <a class="nav-link" href="#tailwind"><span class="nav-dot"></span>Tailwind CSS v4</a>
+      <a class="nav-link" href="#shadcn"><span class="nav-dot"></span>shadcn/ui</a>
+      <a class="nav-link" href="#lucide"><span class="nav-dot"></span>lucide-react</a>
+      <a class="nav-link" href="#recharts"><span class="nav-dot"></span>Recharts</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Auth (Client)</div>
+      <a class="nav-link" href="#better-auth"><span class="nav-dot"></span>better-auth/client</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">Tooling</div>
+      <a class="nav-link" href="#biome"><span class="nav-dot"></span>Biome</a>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <div class="hero">
+      <div class="hero-eyebrow">INTERNE DOKUMENTATION</div>
+      <h1>Devion Frontend Stack</h1>
+      <p>
+        Referenz für alle Libraries im Devion-Frontend (<span class="inline-code">apps/web</span>) — was sie tun,
+        warum wir sie gewählt haben, und wie sie bei uns konkret verwendet werden. Bei Fragen
+        zu einer neuen Library: erst hier nachschauen, dann im Team-Channel fragen.
+      </p>
+      <div class="hero-meta">
+        <div>Stack: <span>Next.js · Bun · TypeScript</span></div>
+        <div>Scope: <span>Nur Frontend (apps/web)</span></div>
+      </div>
+    </div>
+
+    <!-- ============ RUNTIME ============ -->
+
+    <section class="lib-section" id="bun">
+      <div class="lib-header">
+        <div class="lib-title">Bun</div>
+        <span class="tag tag-runtime">Runtime</span>
+      </div>
+      <p class="lib-tagline">JavaScript-Runtime, Package-Manager und Bundler in einem. Ersetzt bei uns Node.js + npm/pnpm komplett.</p>
+
+      <div class="install-row">
+        <span class="code-label" style="margin:0 10px 0 0; white-space:nowrap;">Install</span>
+        <pre><code><span class="cm"># Windows (PowerShell)</span>
+powershell -c "irm bun.sh/install.ps1 | iex"</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Warum wir es nutzen</h4>
+        <ul class="why-list">
+          <li>Deutlich schnellere Installs &amp; Cold-Starts als npm/yarn/pnpm</li>
+          <li>Nativer TypeScript-Support ohne <span class="inline-code">ts-node</span> o.ä.</li>
+          <li>Ein Tool für Runtime, Package-Manager, Test-Runner und Bundler statt vier separater</li>
+        </ul>
+      </div>
+
+      <div class="lib-block">
+        <h4>Befehle, die wir nutzen</h4>
+        <pre><code><span class="kw">bun</span> install
+<span class="kw">bun</span> add react-hook-form
+<span class="kw">bun</span> add -d shadcn
+<span class="kw">bun</span> remove swr
+<span class="kw">bun</span> run dev
+<span class="kw">bun</span> run src/test.ts</code></pre>
+      </div>
+
+      <div class="callout">
+        <strong>Team-Konvention:</strong> Immer <span class="inline-code">bun</span> statt <span class="inline-code">npm</span>/<span class="inline-code">yarn</span> nutzen — gemischte Lockfiles (<span class="inline-code">package-lock.json</span> neben <span class="inline-code">bun.lockb</span>) verursachen inkonsistente Installs im Team.
+      </div>
+
+      <a class="docs-link" href="https://bun.sh/docs" target="_blank">bun.sh/docs →</a>
+    </section>
+
+    <section class="lib-section" id="typescript">
+      <div class="lib-header">
+        <div class="lib-title">TypeScript</div>
+        <span class="tag tag-runtime">Sprache</span>
+      </div>
+      <p class="lib-tagline">Statisch typisiertes JavaScript. Durchgängig im gesamten Monorepo — Frontend, Backend, Config-Packages.</p>
+
+      <div class="lib-block">
+        <h4>Warum strikt wichtig ist</h4>
+        <p>Bei Multi-Tenant-Logik (Org → Team → Project) verhindert strikte Typisierung, dass z.B. eine <span class="inline-code">orgId</span> versehentlich mit einer <span class="inline-code">teamId</span> vertauscht wird — beides ist als <span class="inline-code">string</span> technisch kompatibel, aber fachlich komplett unterschiedlich.</p>
+      </div>
+
+      <div class="lib-block">
+        <h4>Unser Standard in <span class="inline-code">tsconfig.json</span></h4>
+        <pre><code>{
+  <span class="pr">"compilerOptions"</span>: {
+    <span class="pr">"strict"</span>: <span class="kw">true</span>,
+    <span class="pr">"noUncheckedIndexedAccess"</span>: <span class="kw">true</span>,
+    <span class="pr">"paths"</span>: { <span class="st">"@/*"</span>: [<span class="st">"./src/*"</span>] }
+  }
+}</code></pre>
+      </div>
+    </section>
+
+    <section class="lib-section" id="nextjs">
+      <div class="lib-header">
+        <div class="lib-title">Next.js (App Router)</div>
+        <span class="tag tag-runtime">Frontend-Framework</span>
+      </div>
+      <p class="lib-tagline">Reines Frontend bei uns — kein eigenes Backend im Next-Projekt. Übernimmt Routing, Layouts und Rendering.</p>
+
+      <div class="lib-block">
+        <h4>Wichtige Konzepte</h4>
+        <ul class="why-list">
+          <li><span class="inline-code">page.tsx</span> = Route, <span class="inline-code">layout.tsx</span> = persistenter Wrapper</li>
+          <li><span class="inline-code">(gruppe)</span> Ordner = Route Group, taucht nicht in der URL auf</li>
+          <li><span class="inline-code">[param]</span> = dynamisches Segment, z.B. <span class="inline-code">[orgSlug]</span></li>
+        </ul>
+      </div>
+
+      <div class="callout warn">
+        <strong>Team-Konvention — kein RSC:</strong> Wir nutzen bei Devion bewusst <strong style="color:var(--text)">keine Server Components</strong>. Alle Daten kommen über Hono RPC + TanStack Query vom Backend, Next.js ist reine UI-Schicht. Deshalb bekommt <span class="inline-code">jede</span> <span class="inline-code">page.tsx</span> und <span class="inline-code">layout.tsx</span> ohne Ausnahme <span class="inline-code">'use client'</span> als erste Zeile — keine Fallunterscheidung nötig, kein Debugging wegen vergessener Direktive.
+      </div>
+
+      <div class="lib-block">
+        <h4>Beispiel: org-scoped Route</h4>
+        <span class="code-label">app/(org)/[orgSlug]/projects/[projectId]/page.tsx</span>
+        <pre><code><span class="st">'use client'</span> <span class="cm">// immer, ausnahmslos</span>
+
+<span class="kw">import</span> { useProject } <span class="kw">from</span> <span class="st">'@/features/projects/hooks'</span>
+
+<span class="kw">export default function</span> <span class="fn">ProjectPage</span>({
+  params,
+}: {
+  params: { orgSlug: <span class="ty">string</span>; projectId: <span class="ty">string</span> }
+}) {
+  <span class="kw">const</span> { data: project, isLoading } = <span class="fn">useProject</span>(params.projectId)
+
+  <span class="kw">if</span> (isLoading) <span class="kw">return</span> &lt;<span class="fn">ProjectSkeleton</span> /&gt;
+
+  <span class="kw">return</span> &lt;<span class="fn">ProjectOverview</span> project={project} /&gt;
+}</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Beispiel: Org-Layout ohne Server-Fetch</h4>
+        <span class="code-label">app/(org)/[orgSlug]/layout.tsx</span>
+        <pre><code><span class="st">'use client'</span>
+
+<span class="kw">export default function</span> <span class="fn">OrgLayout</span>({
+  children,
+  params,
+}: {
+  children: React.ReactNode
+  params: { orgSlug: <span class="ty">string</span> }
+}) {
+  <span class="kw">const</span> { data: org, isLoading } = <span class="fn">useOrgBySlug</span>(params.orgSlug)
+  <span class="kw">const</span> { data: membership } = <span class="fn">useCurrentMembership</span>(org?.id)
+
+  <span class="kw">if</span> (isLoading) <span class="kw">return</span> &lt;<span class="fn">FullPageSpinner</span> /&gt;
+  <span class="kw">if</span> (!org) <span class="kw">return</span> &lt;<span class="fn">NotFoundState</span> /&gt;
+  <span class="kw">if</span> (!membership) <span class="kw">return</span> &lt;<span class="fn">NoAccessState</span> /&gt;
+
+  <span class="kw">return</span> (
+    &lt;OrgProvider org={org} membership={membership}&gt;
+      &lt;Sidebar variant={<span class="st">'org'</span>} /&gt;
+      &lt;main&gt;{children}&lt;/main&gt;
+    &lt;/OrgProvider&gt;
+  )
+}</code></pre>
+      </div>
+
+      <div class="callout">
+        <strong>Zugriffsschutz ohne <span class="inline-code">redirect()</span>:</strong> <span class="inline-code">redirect()</span>/<span class="inline-code">notFound()</span> aus <span class="inline-code">next/navigation</span> sind Server-Funktionen und funktionieren in Client Components nur eingeschränkt. Stattdessen: Empty/Error-State direkt rendern, oder <span class="inline-code">router.push()</span> in einem <span class="inline-code">useEffect</span>. <span class="inline-code">middleware.ts</span> bleibt davon unberührt — läuft immer im Edge-Runtime und ist unser eigentliches Auth-Gate vor dem ersten Render.
+      </div>
+
+      <div class="lib-block">
+        <h4>Beispiel: Navigation im Code</h4>
+        <pre><code><span class="kw">import</span> Link <span class="kw">from</span> <span class="st">'next/link'</span>
+<span class="kw">import</span> { useRouter } <span class="kw">from</span> <span class="st">'next/navigation'</span>
+
+&lt;Link href={<span class="fn">`/${orgSlug}/projects`</span>}&gt;Projekte&lt;/Link&gt;
+
+<span class="kw">const</span> router = <span class="fn">useRouter</span>()
+router.<span class="fn">push</span>(<span class="fn">`/${orgSlug}/projects/${projectId}`</span>)</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://nextjs.org/docs" target="_blank">nextjs.org/docs →</a>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ BACKEND ============ -->
+
+    <section class="lib-section" id="hono-rpc">
+      <div class="lib-header">
+        <div class="lib-title">Hono RPC (<span class="inline-code">hono/client</span>)</div>
+        <span class="tag tag-data">Typsicherer API-Client</span>
+      </div>
+      <p class="lib-tagline">Der einzige Weg, wie das Frontend mit dem Backend spricht — typsicher, ohne OpenAPI-Codegen. Ersetzt <span class="inline-code">fetch()</span> im gesamten Frontend.</p>
+      <div class="callout">
+        Der <span class="inline-code">AppType</span> kommt aus dem Backend-Repo (<span class="inline-code">@devion/api</span>) — wird nur als Typ importiert, kein Backend-Code landet im Frontend-Bundle.
+      </div>
+
+      <div class="lib-block">
+        <h4>Setup</h4>
+        <span class="code-label">lib/api-client.ts</span>
+        <pre><code><span class="kw">import</span> { hc } <span class="kw">from</span> <span class="st">'hono/client'</span>
+<span class="kw">import type</span> { AppType } <span class="kw">from</span> <span class="st">'@devion/api'</span>
+
+<span class="kw">export const</span> client = <span class="fn">hc</span>&lt;AppType&gt;(
+  process.env.NEXT_PUBLIC_API_URL!,
+  { init: { credentials: <span class="st">'include'</span> } }
+)</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Wichtig zu verstehen</h4>
+        <p>Hono RPC ist <strong style="color:var(--text)">nicht</strong> dasselbe wie TanStack Query. Der RPC-Client macht nur den einzelnen, typsicheren Request — Caching, Retry und Loading-States kommen von TanStack Query obendrüber. Beide werden immer zusammen genutzt, nie als Alternative zueinander.</p>
+      </div>
+
+      <div class="lib-block">
+        <h4>Nutzung</h4>
+        <pre><code><span class="kw">const</span> res = <span class="kw">await</span> client.api.orgs[<span class="st">':orgId'</span>].projects.<span class="fn">$get</span>({
+  param: { orgId }
+})
+<span class="kw">if</span> (!res.ok) <span class="kw">throw new</span> <span class="fn">Error</span>(<span class="st">'Fehler beim Laden'</span>)
+<span class="kw">const</span> projects = <span class="kw">await</span> res.<span class="fn">json</span>() <span class="cm">// voll typisiert</span></code></pre>
+      </div>
+
+      <a class="docs-link" href="https://hono.dev/docs/guides/rpc" target="_blank">hono.dev/docs/guides/rpc →</a>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ DATA & STATE ============ -->
+
+    <section class="lib-section" id="tanstack-query">
+      <div class="lib-header">
+        <div class="lib-title">TanStack Query</div>
+        <span class="tag tag-data">Server-State</span>
+      </div>
+      <p class="lib-tagline">Verwaltet jeden API-Call: Caching, Refetching, Loading/Error-States, Invalidation. Das Rückgrat unseres Data-Fetchings.</p>
+
+      <div class="install-row">
+        <pre><code>bun add @tanstack/react-query</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Query-Keys — immer org-scoped</h4>
+        <p>Bei Multi-Tenancy <strong style="color:var(--text)">muss</strong> die <span class="inline-code">orgId</span> im Query-Key stehen, sonst leaked der Cache zwischen Organisationen beim Wechsel.</p>
+        <span class="code-label">lib/query-keys.ts</span>
+        <pre><code><span class="kw">export const</span> queryKeys = {
+  orgs: {
+    projects: (orgId: <span class="ty">string</span>) =&gt; [<span class="st">'orgs'</span>, orgId, <span class="st">'projects'</span>] <span class="kw">as const</span>,
+  },
+}</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Standard-Hook-Pattern</h4>
+        <pre><code><span class="kw">export function</span> <span class="fn">useProjects</span>(orgId: <span class="ty">string</span>) {
+  <span class="kw">return</span> <span class="fn">useQuery</span>({
+    queryKey: queryKeys.orgs.<span class="fn">projects</span>(orgId),
+    queryFn: () =&gt; <span class="fn">fetchProjects</span>(orgId),
+    enabled: !!orgId,
+  })
+}</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Mutation + Invalidation</h4>
+        <pre><code><span class="kw">export function</span> <span class="fn">useCreateProject</span>(orgId: <span class="ty">string</span>) {
+  <span class="kw">const</span> queryClient = <span class="fn">useQueryClient</span>()
+  <span class="kw">return</span> <span class="fn">useMutation</span>({
+    mutationFn: <span class="fn">createProject</span>,
+    onSuccess: () =&gt; {
+      queryClient.<span class="fn">invalidateQueries</span>({
+        queryKey: queryKeys.orgs.<span class="fn">projects</span>(orgId)
+      })
+    },
+  })
+}</code></pre>
+      </div>
+
+      <div class="callout warn">
+        <strong>Team-Konvention:</strong> <span class="inline-code">swr</span> wurde bewusst entfernt — wir nutzen ausschließlich TanStack Query für Server-State, nie beides parallel.
+      </div>
+
+      <a class="docs-link" href="https://tanstack.com/query" target="_blank">tanstack.com/query →</a>
+    </section>
+
+    <section class="lib-section" id="tanstack-table">
+      <div class="lib-header">
+        <div class="lib-title">TanStack Table</div>
+        <span class="tag tag-data">Tabellen-Logik</span>
+      </div>
+      <p class="lib-tagline">Headless — liefert nur die Logik (Sorting, Filtering, Pagination), das UI bauen wir selbst mit shadcn's Table-Komponenten.</p>
+
+      <div class="lib-block">
+        <h4>Wo wir es einsetzen</h4>
+        <ul class="why-list">
+          <li>Projects-, Hardware-, Members-, Audit-Log-Tabellen</li>
+          <li>Column-Definitions sind vollständig typsicher basierend auf dem API-Response-Typ</li>
+        </ul>
+      </div>
+
+      <div class="lib-block">
+        <h4>Beispiel: Server-Tabelle</h4>
+        <span class="code-label">features/hardware/components/node-table.tsx</span>
+        <pre><code><span class="kw">const</span> columns: ColumnDef&lt;Node&gt;[] = [
+  {
+    accessorKey: <span class="st">'name'</span>,
+    header: <span class="st">'Name'</span>,
+  },
+  {
+    accessorKey: <span class="st">'status'</span>,
+    header: <span class="st">'Status'</span>,
+    cell: ({ row }) =&gt; &lt;<span class="fn">NodeStatusBadge</span> status={row.original.status} /&gt;,
+  },
+  {
+    accessorKey: <span class="st">'cpuUsage'</span>,
+    header: <span class="st">'CPU'</span>,
+    cell: ({ row }) =&gt; <span class="fn">`${row.original.cpuUsage}%`</span>,
+  },
+]
+
+<span class="kw">export function</span> <span class="fn">NodeTable</span>({ data }: { data: Node[] }) {
+  <span class="kw">const</span> table = <span class="fn">useReactTable</span>({
+    data,
+    columns,
+    getCoreRowModel: <span class="fn">getCoreRowModel</span>(),
+    getSortedRowModel: <span class="fn">getSortedRowModel</span>(),
+  })
+
+  <span class="kw">return</span> (
+    &lt;Table&gt;
+      &lt;TableHeader&gt;
+        {table.<span class="fn">getHeaderGroups</span>().<span class="fn">map</span>((hg) =&gt; (
+          &lt;TableRow key={hg.id}&gt;
+            {hg.headers.<span class="fn">map</span>((h) =&gt; &lt;TableHead key={h.id}&gt;...&lt;/TableHead&gt;)}
+          &lt;/TableRow&gt;
+        ))}
+      &lt;/TableHeader&gt;
+      &lt;TableBody&gt;
+        {table.<span class="fn">getRowModel</span>().rows.<span class="fn">map</span>((row) =&gt; (
+          &lt;TableRow key={row.id}&gt;...&lt;/TableRow&gt;
+        ))}
+      &lt;/TableBody&gt;
+    &lt;/Table&gt;
+  )
+}</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://tanstack.com/table" target="_blank">tanstack.com/table →</a>
+    </section>
+
+    <section class="lib-section" id="zustand">
+      <div class="lib-header">
+        <div class="lib-title">Zustand</div>
+        <span class="tag tag-state">Client-State</span>
+      </div>
+      <p class="lib-tagline">Minimaler Client-State-Store (~1kb). Nur für reinen UI-State — niemals für Server-Daten, dafür ist TanStack Query zuständig.</p>
+
+      <div class="lib-block">
+        <h4>Wofür wir es nutzen</h4>
+        <ul class="why-list">
+          <li>Sidebar collapsed/expanded</li>
+          <li>Theme-Präferenz</li>
+          <li>Zuletzt besuchte Organisationen</li>
+        </ul>
+      </div>
+
+      <pre><code><span class="kw">export const</span> useUIStore = <span class="fn">create</span>&lt;UIState&gt;((set) =&gt; ({
+  sidebarCollapsed: <span class="kw">false</span>,
+  toggleSidebar: () =&gt; <span class="fn">set</span>((s) =&gt; ({ sidebarCollapsed: !s.sidebarCollapsed })),
+}))</code></pre>
+
+      <a class="docs-link" href="https://zustand.docs.pmnd.rs" target="_blank">zustand.docs.pmnd.rs →</a>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ FORMS ============ -->
+
+    <section class="lib-section" id="rhf">
+      <div class="lib-header">
+        <div class="lib-title">React Hook Form</div>
+        <span class="tag tag-forms">Formulare</span>
+      </div>
+      <p class="lib-tagline">Uncontrolled-by-default — kaum Re-Renders, auch bei komplexen Multi-Step-Forms wie dem Datenbank-Provisioning-Wizard.</p>
+
+      <div class="install-row">
+        <pre><code>bun add react-hook-form @hookform/resolvers</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Beispiel: Login-Form mit Zod-Validation</h4>
+        <span class="code-label">features/auth/components/login-form.tsx</span>
+        <pre><code><span class="kw">const</span> loginSchema = z.<span class="fn">object</span>({
+  email: z.<span class="fn">string</span>().<span class="fn">email</span>(<span class="st">'Ungültige E-Mail'</span>),
+  password: z.<span class="fn">string</span>().<span class="fn">min</span>(8, <span class="st">'Mindestens 8 Zeichen'</span>),
+})
+
+<span class="kw">type</span> LoginInput = z.infer&lt;<span class="kw">typeof</span> loginSchema&gt;
+
+<span class="kw">export function</span> <span class="fn">LoginForm</span>() {
+  <span class="kw">const</span> form = <span class="fn">useForm</span>&lt;LoginInput&gt;({
+    resolver: <span class="fn">zodResolver</span>(loginSchema),
+    defaultValues: { email: <span class="st">''</span>, password: <span class="st">''</span> },
+  })
+
+  <span class="kw">const</span> { mutate, isPending } = <span class="fn">useLogin</span>()
+
+  <span class="kw">function</span> <span class="fn">onSubmit</span>(values: LoginInput) {
+    <span class="fn">mutate</span>(values)
+  }
+
+  <span class="kw">return</span> (
+    &lt;Form {...form}&gt;
+      &lt;form onSubmit={form.<span class="fn">handleSubmit</span>(onSubmit)}&gt;
+        &lt;FormField
+          control={form.control}
+          name={<span class="st">'email'</span>}
+          render={({ field }) =&gt; (
+            &lt;FormItem&gt;
+              &lt;FormLabel&gt;E-Mail&lt;/FormLabel&gt;
+              &lt;FormControl&gt;&lt;Input {...field} /&gt;&lt;/FormControl&gt;
+              &lt;FormMessage /&gt;
+            &lt;/FormItem&gt;
+          )}
+        /&gt;
+        &lt;Button type={<span class="st">'submit'</span>} disabled={isPending}&gt;
+          Anmelden
+        &lt;/Button&gt;
+      &lt;/form&gt;
+    &lt;/Form&gt;
+  )
+}</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://react-hook-form.com" target="_blank">react-hook-form.com →</a>
+    </section>
+
+    <section class="lib-section" id="zod">
+      <div class="lib-header">
+        <div class="lib-title">Zod</div>
+        <span class="tag tag-forms">Schema-Validierung</span>
+      </div>
+      <p class="lib-tagline">Validierung für Formulare, ENV-Variablen und API-Payloads. Ein Schema, mehrere Einsatzorte.</p>
+
+      <div class="lib-block">
+        <h4>Beispiel: Provisioning-Schema mit verschachtelter Validierung</h4>
+        <pre><code><span class="kw">const</span> createDatabaseSchema = z.<span class="fn">object</span>({
+  engine: z.<span class="fn">enum</span>([<span class="st">'postgres'</span>, <span class="st">'mysql'</span>, <span class="st">'redis'</span>]),
+  name: z.<span class="fn">string</span>().<span class="fn">min</span>(3).<span class="fn">max</span>(63),
+  nodeId: z.<span class="fn">string</span>().<span class="fn">uuid</span>(<span class="st">'Bitte einen Node auswählen'</span>),
+  publicAccess: z.<span class="fn">boolean</span>().<span class="fn">default</span>(<span class="kw">false</span>),
+})
+
+<span class="kw">type</span> CreateDatabaseInput = z.infer&lt;<span class="kw">typeof</span> createDatabaseSchema&gt;</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Auch für ENV-Validation im Einsatz</h4>
+        <pre><code><span class="kw">const</span> envSchema = z.<span class="fn">object</span>({
+  NEXT_PUBLIC_API_URL: z.<span class="fn">string</span>().<span class="fn">url</span>(),
+})
+<span class="kw">export const</span> env = envSchema.<span class="fn">parse</span>(process.env)</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://zod.dev" target="_blank">zod.dev →</a>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ UI & STYLING ============ -->
+
+    <section class="lib-section" id="tailwind">
+      <div class="lib-header">
+        <div class="lib-title">Tailwind CSS v4</div>
+        <span class="tag tag-ui">Styling</span>
+      </div>
+      <p class="lib-tagline">Utility-First-CSS, Basis für unser gesamtes Design-System zusammen mit shadcn.</p>
+
+      <div class="callout">
+        <strong>v4-Hinweis:</strong> Konfiguration läuft über CSS (<span class="inline-code">@theme</span>), nicht mehr über <span class="inline-code">tailwind.config.js</span> wie in v3.
+      </div>
+
+      <div class="lib-block">
+        <h4>Beispiel: Status-Badge mit <span class="inline-code">cn()</span></h4>
+        <pre><code><span class="kw">function</span> <span class="fn">NodeStatusBadge</span>({ status }: { status: <span class="ty">'online'</span> | <span class="ty">'offline'</span> }) {
+  <span class="kw">return</span> (
+    &lt;span
+      className={<span class="fn">cn</span>(
+        <span class="st">'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs'</span>,
+        status === <span class="st">'online'</span>
+          ? <span class="st">'bg-emerald-500/10 text-emerald-400'</span>
+          : <span class="st">'bg-zinc-800 text-zinc-500'</span>
+      )}
+    &gt;
+      {status}
+    &lt;/span&gt;
+  )
+}</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://tailwindcss.com/docs" target="_blank">tailwindcss.com/docs →</a>
+    </section>
+
+    <section class="lib-section" id="shadcn">
+      <div class="lib-header">
+        <div class="lib-title">shadcn/ui</div>
+        <span class="tag tag-ui">Komponenten</span>
+      </div>
+      <p class="lib-tagline">Kein NPM-Package im klassischen Sinn — Komponenten werden per CLI generiert und liegen als eigener Code im Repo unter <span class="inline-code">components/ui/</span>.</p>
+
+      <div class="lib-block">
+        <h4>Warum das wichtig ist</h4>
+        <p>Volle Kontrolle über den Komponenten-Code — keine Blackbox-Library. Anpassungen passieren direkt am generierten Code, nicht über Props-Overrides einer fremden Library.</p>
+      </div>
+
+      <pre><code>bunx shadcn@latest add table dialog dropdown-menu chart</code></pre>
+
+      <div class="lib-block">
+        <h4>Beispiel: generierte Komponente nutzen</h4>
+        <pre><code><span class="kw">import</span> { Dialog, DialogContent, DialogTrigger } <span class="kw">from</span> <span class="st">'@/components/ui/dialog'</span>
+<span class="kw">import</span> { Button } <span class="kw">from</span> <span class="st">'@/components/ui/button'</span>
+
+&lt;Dialog&gt;
+  &lt;DialogTrigger asChild&gt;
+    &lt;Button&gt;Node verbinden&lt;/Button&gt;
+  &lt;/DialogTrigger&gt;
+  &lt;DialogContent&gt;
+    &lt;ConnectNodeWizard /&gt;
+  &lt;/DialogContent&gt;
+&lt;/Dialog&gt;</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://ui.shadcn.com" target="_blank">ui.shadcn.com →</a>
+    </section>
+
+    <section class="lib-section" id="lucide">
+      <div class="lib-header">
+        <div class="lib-title">lucide-react</div>
+        <span class="tag tag-ui">Icons</span>
+      </div>
+      <p class="lib-tagline">Standard-Icon-Set von shadcn. Einziges Icon-Package im Projekt — kein Mischen mit anderen Icon-Libraries.</p>
+
+      <div class="lib-block">
+        <h4>Beispiel</h4>
+        <pre><code><span class="kw">import</span> { Server, Database, ChevronDown } <span class="kw">from</span> <span class="st">'lucide-react'</span>
+
+&lt;Server className={<span class="st">'h-4 w-4 text-zinc-400'</span>} /&gt;</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://lucide.dev" target="_blank">lucide.dev →</a>
+    </section>
+
+    <section class="lib-section" id="recharts">
+      <div class="lib-header">
+        <div class="lib-title">Recharts</div>
+        <span class="tag tag-ui">Charts</span>
+      </div>
+      <p class="lib-tagline">Für CPU/RAM/Traffic-Graphen in Metrics-Views. Wird über shadcn's Chart-Wrapper installiert, nicht direkt.</p>
+      <pre><code>bunx shadcn@latest add chart</code></pre>
+
+      <div class="lib-block">
+        <h4>Beispiel: CPU-Auslastung über Zeit</h4>
+        <pre><code><span class="kw">import</span> { AreaChart, Area, XAxis, YAxis } <span class="kw">from</span> <span class="st">'recharts'</span>
+
+&lt;AreaChart data={cpuMetrics}&gt;
+  &lt;XAxis dataKey={<span class="st">'timestamp'</span>} /&gt;
+  &lt;YAxis unit={<span class="st">'%'</span>} /&gt;
+  &lt;Area
+    dataKey={<span class="st">'cpuUsage'</span>}
+    stroke={<span class="st">'#34d399'</span>}
+    fill={<span class="st">'#34d399'</span>}
+    fillOpacity={0.15}
+  /&gt;
+&lt;/AreaChart&gt;</code></pre>
+      </div>
+
+      <a class="docs-link" href="https://recharts.org" target="_blank">recharts.org →</a>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ AUTH (CLIENT) ============ -->
+
+    <section class="lib-section" id="better-auth">
+      <div class="lib-header">
+        <div class="lib-title">better-auth/client</div>
+        <span class="tag tag-forms">Auth-Client</span>
+      </div>
+      <p class="lib-tagline">Der Client-Teil von better-auth — im Frontend zuständig für Login, Register, Session-Handling und Org-Switching. Die eigentliche Auth-Logik (DB-Adapter, Plugins) liegt im Backend, nicht hier.</p>
+
+      <div class="lib-block">
+        <h4>Setup im Frontend</h4>
+        <pre><code><span class="kw">import</span> { createAuthClient } <span class="kw">from</span> <span class="st">'better-auth/client'</span>
+<span class="kw">import</span> { organizationClient } <span class="kw">from</span> <span class="st">'better-auth/client/plugins'</span>
+
+<span class="kw">export const</span> authClient = <span class="fn">createAuthClient</span>({
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  plugins: [<span class="fn">organizationClient</span>()],
+})</code></pre>
+      </div>
+
+      <div class="lib-block">
+        <h4>Nutzung in Komponenten</h4>
+        <pre><code><span class="kw">const</span> { data: session } = authClient.<span class="fn">useSession</span>()
+
+<span class="kw">await</span> authClient.signIn.<span class="fn">email</span>({ email, password })</code></pre>
+      </div>
+
+      <div class="callout warn">
+        <strong>Wichtig:</strong> Immer <span class="inline-code">better-auth/client</span> als Subpath-Import aus dem Hauptpaket <span class="inline-code">better-auth</span> nutzen. Das alte, separate <span class="inline-code">@better-auth/client</span>-Package (Alpha-Stand) wird bei uns nicht mehr verwendet.
+      </div>
+
+      <a class="docs-link" href="https://better-auth.com/docs" target="_blank">better-auth.com/docs →</a>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ TOOLING ============ -->
+
+    <section class="lib-section" id="biome">
+      <div class="lib-header">
+        <div class="lib-title">Biome</div>
+        <span class="tag tag-tooling">Lint &amp; Format</span>
+      </div>
+      <p class="lib-tagline">Ersetzt ESLint + Prettier durch ein einziges, deutlich schnelleres Tool (Rust-basiert).</p>
+
+      <pre><code>bun run lint      <span class="cm"># biome check</span>
+bun run format    <span class="cm"># biome format --write</span></code></pre>
+
+      <div class="callout">
+        <strong>Team-Konvention:</strong> Vor jedem Commit <span class="inline-code">bun run format</span> laufen lassen — vermeidet Formatierungs-Diffs in PRs, die nichts mit der eigentlichen Änderung zu tun haben.
+      </div>
+
+      <a class="docs-link" href="https://biomejs.dev" target="_blank">biomejs.dev →</a>
+    </section>
+
+    <footer>
+      Devion Internal Docs — zuletzt aktualisiert vom Team, bei Änderungen am Stack bitte hier ergänzen.
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  const links = document.querySelectorAll('.nav-link');
+  const sections = document.querySelectorAll('.lib-section');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const id = entry.target.getAttribute('id');
+      const link = document.querySelector('.nav-link[href="#' + id + '"]');
+      if (!link) return;
+      if (entry.isIntersecting) {
+        links.forEach((l) => l.classList.remove('active'));
+        link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-10% 0px -75% 0px', threshold: 0 });
+
+  sections.forEach((s) => observer.observe(s));
+</script>
+
+</body>
+</html>
