@@ -1,12 +1,6 @@
 // app/layout.tsx
-import type { Metadata } from 'next'
-import './globals.css'
 import { Providers } from '@/lib/provider'
-
-export const metadata: Metadata = {
-  title: 'Snyxe',
-  description: 'Hosting Dashboard',
-}
+import './globals.css'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
