@@ -1,8 +1,8 @@
 // lib/api-client.ts
 import { hc } from 'hono/client'
 import type { AppType } from '@devion/types'
-
-const baseUrl = process.env.NEXT_PUBLIC_API_URL
+import { clientEnv } from "@devion/env"
+const baseUrl = clientEnv.NEXT_PUBLIC_API_URL;
 
 if (!baseUrl) {
   throw new Error('API URL ist nicht gesetzt')
