@@ -1,31 +1,24 @@
-import type { Metadata, Viewport } from "next";
-import { Providers } from "@/lib/provider";
-import "./globals.css";
+import type { Metadata } from 'next'
+import './globals.css'
+import { Providers } from '@/lib/provider'
 
+// HINWEIS — Ausnahme von unserer "immer use client"-Konvention:
+// Dieses Root-Layout bleibt bewusst eine Server Component, weil
+// `export const metadata` nur in Server Components funktioniert.
+// Es enthält selbst keine Hooks und lädt keine Daten — nur <html>/<body>
+// plus den Providers-Wrapper (der intern 'use client' ist). Alle
+// Routen darunter folgen weiterhin konsequent der 'use client'-Regel.
 export const metadata: Metadata = {
-  title: {
-    default: "Devion — Deine Infrastruktur. Deine Kontrolle.",
-    template: "%s · Devion",
-  },
-  description:
-    "Die self-hosted Plattform zur Verwaltung, Bereitstellung und Überwachung von Anwendungen auf eigener Hardware.",
-};
+  title: 'Devion',
+  description: 'Self-hosted Application Management & Hosting Platform',
+}
 
-export const viewport: Viewport = {
-  colorScheme: "dark",
-  themeColor: "#11191F",
-};
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="de">
-      <body className="antialiased">
+      <body>
         <Providers>{children}</Providers>
       </body>
     </html>
-  );
+  )
 }

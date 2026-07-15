@@ -7,6 +7,7 @@ export function middleware(request: NextRequest) {
   const sessionCookie = request.cookies.get('devion.session')?.value
   const path = request.nextUrl.pathname
 
+  
   const isAuthRoute =
     path.startsWith('/login') ||
     path.startsWith('/register') ||

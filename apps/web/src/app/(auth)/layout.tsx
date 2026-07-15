@@ -1,6 +1,13 @@
-export default function AuthLayout({ children }: { children: React.ReactNode }) {
+'use client'
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+    <div>
+      {/* TODO: Zentrierter Wrapper ohne Sidebar, für alle Login/Register-Flows */}
       {children}
     </div>
   )

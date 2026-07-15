@@ -1,10 +1,14 @@
-import { Sidebar } from '@/components/layout/sidebar'
+'use client'
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default function AdminLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex min-h-screen">
-      <Sidebar variant="admin" />
-      <main className="flex-1 overflow-y-auto p-6">{children}</main>
+    <div>
+      {/* TODO: Eigener Sidebar-Scope (variant='admin'), Zugriff nur für Plattform-Admins — siehe middleware.ts */}
+      {children}
     </div>
   )
 }
