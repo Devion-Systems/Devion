@@ -2,18 +2,15 @@
 
 import { ArrowRight, AtSign, KeyRound, UserRound } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import {
   AuthButton,
   AuthField,
   AuthHeader,
-  AuthNotice,
   AuthPanel,
   PasswordMeter,
-} from "@/features/auth/components/AuthPrimitives";
-import { authClient } from "@/lib/auth-client";
+} from "../_components/AuthPrimitives";
 
 function FormSection({
   number,
@@ -38,43 +35,10 @@ function FormSection({
 }
 
 export default function RegisterPage() {
-  const router = useRouter();
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmation, setConfirmation] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function previewOnly(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-
-    if (password.length < 8)
-      return setError("Use at least 8 characters for your password.");
-    if (password !== confirmation)
-      return setError("The passwords do not match.");
-
-    setLoading(true);
-    try {
-      const result = await authClient.signUp.email({
-        name: `${firstName.trim()} ${lastName.trim()}`,
-        email,
-        password,
-      });
-      if (result.error)
-        throw new Error(result.error.message ?? "Account creation failed.");
-      router.push(`/verify-email?email=${encodeURIComponent(email)}`);
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "We could not create your account.",
-      );
-    } finally {
-      setLoading(false);
-    }
   }
 
   return (
@@ -85,8 +49,7 @@ export default function RegisterPage() {
         description="Create one account for projects, deployments and infrastructure."
       />
 
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        {error ? <AuthNotice type="error">{error}</AuthNotice> : null}
+      <form className="space-y-4" onSubmit={previewOnly}>
         <div className="space-y-3">
           <FormSection
             number="01"
@@ -103,9 +66,6 @@ export default function RegisterPage() {
                 icon={UserRound}
                 placeholder="Alex"
                 autoComplete="given-name"
-                value={firstName}
-                onChange={(event) => setFirstName(event.target.value)}
-                required
               />
               <AuthField
                 id="lastName"
@@ -115,9 +75,6 @@ export default function RegisterPage() {
                 icon={UserRound}
                 placeholder="Morgan"
                 autoComplete="family-name"
-                value={lastName}
-                onChange={(event) => setLastName(event.target.value)}
-                required
               />
             </div>
             <AuthField
@@ -129,12 +86,10 @@ export default function RegisterPage() {
               icon={AtSign}
               placeholder="you@example.com"
               autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
             />
           </div>
         </div>
+
         <div className="space-y-3 border-t border-[#F5F6FA]/[0.07] pt-3">
           <FormSection
             number="02"
@@ -154,7 +109,6 @@ export default function RegisterPage() {
                 autoComplete="new-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                required
               />
               <PasswordMeter password={password} />
             </div>
@@ -167,15 +121,12 @@ export default function RegisterPage() {
               icon={KeyRound}
               placeholder="Repeat password"
               autoComplete="new-password"
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-              required
             />
           </div>
         </div>
 
-        <AuthButton loading={loading}>
-          Create account{" "}
+        <AuthButton>
+          Create account
           <ArrowRight className="size-4 transition-transform group-hover/button:translate-x-0.5" />
         </AuthButton>
       </form>

@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 
+import devionLogo from "./devion-logo.png";
+
 function Brand() {
   return (
     <Link
@@ -12,7 +14,7 @@ function Brand() {
     >
       <span className="relative grid size-14 place-items-center overflow-hidden rounded-2xl border border-[#00CEC9]/25 bg-[#1E272E] shadow-[0_18px_55px_rgba(9,132,227,.2)] transition-transform duration-300 group-hover:-translate-y-0.5">
         <Image
-          src="/devion-logo.png"
+          src={devionLogo}
           alt=""
           width={48}
           height={48}

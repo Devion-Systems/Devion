@@ -1,13 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  LoaderCircle,
-} from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useState } from "react";
 
@@ -95,48 +89,15 @@ export function AuthField({
   );
 }
 
-export function AuthButton({
-  loading,
-  children,
-  ...props
-}: ComponentProps<"button"> & { loading?: boolean }) {
+export function AuthButton({ children, ...props }: ComponentProps<"button">) {
   return (
     <button
       type="submit"
-      disabled={loading || props.disabled}
       className="group/button flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00CEC9] px-5 text-sm font-semibold text-[#1E272E] shadow-[0_14px_36px_rgba(0,206,201,.2)] transition hover:bg-[#0984E3] hover:text-[#F5F6FA] hover:shadow-[0_18px_48px_rgba(9,132,227,.28)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#00CEC9]/25 disabled:cursor-not-allowed disabled:opacity-50"
       {...props}
     >
-      {loading ? <LoaderCircle className="size-4 animate-spin" /> : null}
       {children}
     </button>
-  );
-}
-
-export function AuthNotice({
-  type,
-  children,
-}: {
-  type: "error" | "success" | "info";
-  children: ReactNode;
-}) {
-  const success = type === "success";
-  const error = type === "error";
-  const Icon = success ? CheckCircle2 : AlertCircle;
-
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-xl border px-4 py-3 text-xs leading-5",
-        success && "border-[#00CEC9]/25 bg-[#00CEC9]/[0.06] text-[#00CEC9]",
-        error && "border-red-400/20 bg-red-400/[0.06] text-red-200/80",
-        type === "info" &&
-          "border-[#0984E3]/25 bg-[#0984E3]/[0.06] text-[#0984E3]",
-      )}
-    >
-      <Icon className="mt-0.5 size-4 shrink-0" />
-      <span>{children}</span>
-    </div>
   );
 }
 

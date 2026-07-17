@@ -2,50 +2,18 @@
 
 import { ArrowRight, AtSign, KeyRound } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import type { FormEvent } from "react";
 
 import {
   AuthButton,
   AuthField,
   AuthHeader,
-  AuthNotice,
   AuthPanel,
-} from "@/features/auth/components/AuthPrimitives";
-import { authClient } from "@/lib/auth-client";
+} from "../_components/AuthPrimitives";
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function previewOnly(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      const result = await authClient.signIn.email({
-        email,
-        password,
-        rememberMe,
-      });
-      if (result.error)
-        throw new Error(result.error.message ?? "Sign in failed.");
-      router.push("/");
-      router.refresh();
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "We could not sign you in. Please try again.",
-      );
-    } finally {
-      setLoading(false);
-    }
   }
 
   return (
@@ -56,20 +24,15 @@ export default function LoginPage() {
         description="Sign in to manage projects, deployments and the infrastructure behind them."
       />
 
-      <form className="space-y-5" onSubmit={handleSubmit}>
-        {error ? <AuthNotice type="error">{error}</AuthNotice> : null}
-
+      <form className="space-y-5" onSubmit={previewOnly}>
         <AuthField
           id="email"
           name="email"
           type="email"
           label="Email"
           icon={AtSign}
-          placeholder="you@company.com"
+          placeholder="you@example.com"
           autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
         />
         <div>
           <AuthField
@@ -80,16 +43,12 @@ export default function LoginPage() {
             icon={KeyRound}
             placeholder="Enter your password"
             autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
           />
           <div className="mt-3 flex items-center justify-between gap-4">
             <label className="flex cursor-pointer items-center gap-2 text-[10px] text-white/35">
               <input
                 type="checkbox"
-                checked={rememberMe}
-                onChange={(event) => setRememberMe(event.target.checked)}
+                defaultChecked
                 className="size-3.5 rounded border-white/15 bg-white/[0.04] accent-[#0984E3]"
               />
               Keep me signed in
@@ -103,8 +62,8 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <AuthButton loading={loading}>
-          Sign in{" "}
+        <AuthButton>
+          Sign in
           <ArrowRight className="size-4 transition-transform group-hover/button:translate-x-0.5" />
         </AuthButton>
       </form>
