@@ -1,6 +1,22 @@
 version: '3.9'
 
 services:
+  traefik:
+    image: traefik:v3.1
+    container_name: Devion-traefik
+    command:
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - Devion-network
+
   postgres:
     image: postgres:18.4-alpine
     container_name: Devion-DB
@@ -28,6 +44,12 @@ services:
       - registry_data:/var/lib/registry
     networks:
       - Devion-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.registry.rule=Host(`registry.devion.local`)"
+      - "traefik.http.routers.registry.entrypoints=websecure"
+      - "traefik.http.routers.registry.tls=true" # Aktiviert TLS mit generierten Zertifikaten
+      - "traefik.http.services.registry.loadbalancer.server.port=5000"
 
   rustfs:
     image: rustfs/rustfs:latest
@@ -47,6 +69,12 @@ services:
       - rustfs_data:/data
     networks:
       - Devion-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.storage.rule=Host(`storage.devion.local`)"
+      - "traefik.http.routers.storage.entrypoints=websecure"
+      - "traefik.http.routers.storage.tls=true"
+      - "traefik.http.services.storage.loadbalancer.server.port=9000"
 
 volumes:
   postgres_data:
