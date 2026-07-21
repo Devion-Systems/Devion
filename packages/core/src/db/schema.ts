@@ -20,61 +20,28 @@ export const ipBlacklist = pgTable("ip_blacklist", {
   ...timestamps
 });
 
-// Multi-tenant / auth related tables
-export const tenants = pgTable("tenants", {
+export const system_feature = pgTable("system_feature", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  name: varchar().notNull(),
-  slug: varchar().notNull().unique(),
-  metadata: text(),
-  ...timestamps,
+  name: varchar().notNull().unique(),
+  description: text(),
+  tier: varchar().notNull().default("standard"), // Steuert das Lizenz-Paket
+  
+  // Lokal vom Kunden umschaltbar (z.B. um ein Feature zu deaktivieren, das er nicht nutzen will)
+  isActive: boolean().notNull().default(false), 
+  
+  // Kryptografischer Schutz gegen Manipulation durch den Kunden
+  licenseSignature: text("license_signature"), 
+  
+   ...timestamps
 });
 
-export const organizations = pgTable("organizations", {
+export const system_feature_log = pgTable("system_feature_log", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  tenant_id: integer().notNull(),
-  name: varchar().notNull(),
-  slug: varchar().notNull(),
-  metadata: text(),
-  ...timestamps,
+  featureId: integer()
+    .notNull()
+    .references(() => system_feature.id, { onDelete: "cascade" }),
+  action: varchar().notNull(), // "activated" oder "deactivated"
+  ...timestamps
 });
 
-export const org_memberships = pgTable("org_memberships", {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  org_id: integer().notNull(),
-  user_id: varchar().notNull(), // better-auth user id (string/uuid)
-  role: varchar().default("member"),
-  is_owner: boolean().default(false),
-  ...timestamps,
-});
 
-export const api_keys = pgTable("api_keys", {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  org_id: integer(),
-  user_id: varchar(),
-  name: varchar().notNull(),
-  key_hash: varchar().notNull(),
-  revoked: boolean().default(false),
-  scopes: text(),
-  ...timestamps,
-});
-
-export const refresh_tokens = pgTable("refresh_tokens", {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  user_id: varchar().notNull(),
-  token_hash: varchar().notNull(),
-  revoked: boolean().default(false),
-  expires_at: timestamp(),
-  ...timestamps,
-});
-
-export const builder_jobs = pgTable("builder_jobs", {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  owner_user_id: varchar().notNull(),
-  org_id: integer(),
-  project_id: integer(),
-  status: varchar().default("pending"),
-  logs: text(),
-  started_at: timestamp(),
-  finished_at: timestamp(),
-  ...timestamps,
-});
