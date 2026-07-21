@@ -1,22 +1,17 @@
-version: '3.9'
-
 services:
-  traefik:
-    image: traefik:v3.1
-    container_name: Devion-traefik
-    command:
-      - "--providers.docker=true"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
+  # --- LOKALER DNS SERVER ---
+  dnsmasq:
+    image: jpillora/dnsmasq
+    container_name: Devion-DNS
+    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - "53:53/udp"
+      - "53:53/tcp"
+    command: --address=/.devion.local/127.0.0.1 --log-facility=-
     networks:
-      - Devion-network
+      - Devion-Core-Network
 
+  # --- DATENBANK ---
   postgres:
     image: postgres:18.4-alpine
     container_name: Devion-DB
@@ -30,35 +25,63 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - Devion-network
+      - Devion-Core-Network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-devion_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # --- MAIN EDGE ROUTER ---
+  traefik:
+    image: traefik:v3.1
+    container_name: Devion-Router
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Hier greifen wir sauber auf deine System-Pfade aus der Installation zu
+      - /opt/devion/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /opt/devion/traefik/dynamic:/etc/traefik/dynamic:ro
+      - /opt/devion/certs:/letsencrypt
+    networks:
+      - Devion-Core-Network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- REGISTRY ---
   registry:
     image: registry:2
-    container_name: Devion-registry
+    container_name: Devion-Registry
     restart: unless-stopped
-    ports:
-      - "${REGISTRY_PORT:-5001}:5000"
     environment:
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     volumes:
       - registry_data:/var/lib/registry
     networks:
-      - Devion-network
+      - Devion-Core-Network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.registry.rule=Host(`registry.devion.local`)"
       - "traefik.http.routers.registry.entrypoints=websecure"
-      - "traefik.http.routers.registry.tls=true" # Aktiviert TLS mit generierten Zertifikaten
+      - "traefik.http.routers.registry.tls=true"
       - "traefik.http.services.registry.loadbalancer.server.port=5000"
 
+  # --- BLOB STORAGE (RustFS) ---
   rustfs:
     image: rustfs/rustfs:latest
     container_name: Devion-storage
     restart: unless-stopped
     entrypoint: [ "/usr/local/bin/rustfs", "--console-enable", "/data" ]
-    ports:
-      - "${S3_PORT:-9000}:9000"          # S3 API Endpunkt
-      - "${CONSOLE_PORT:-9001}:9001"    # RustFS Web-Konsole
     environment:
       - RUSTFS_ACCESS_KEY=${S3_ACCESS_KEY:-onprem_access_key}
       - RUSTFS_SECRET_KEY=${S3_SECRET_KEY:-onprem_secret_key_must_be_long}
@@ -68,12 +91,14 @@ services:
     volumes:
       - rustfs_data:/data
     networks:
-      - Devion-network
+      - Devion-Core-Network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.storage.rule=Host(`storage.devion.local`)"
+      # Hinweis: Nutzt den Resolver "le-kunden" aus deiner ausgelagerten traefik.yml
+      - "traefik.http.routers.storage.rule=Host(`storage.deine-domain.de`)"
       - "traefik.http.routers.storage.entrypoints=websecure"
       - "traefik.http.routers.storage.tls=true"
+      - "traefik.http.routers.storage.tls.certresolver=le-kunden"
       - "traefik.http.services.storage.loadbalancer.server.port=9000"
 
 volumes:
@@ -85,5 +110,5 @@ volumes:
     driver: local
 
 networks:
-  Devion-network:
+  Devion-Core-Network:
     driver: bridge
