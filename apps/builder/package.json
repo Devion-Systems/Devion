@@ -1,5 +1,5 @@
 {
-  "name": "@devion/api",
+  "name": "@devion/builder",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
