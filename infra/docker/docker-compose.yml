@@ -55,7 +55,6 @@ services:
     image: rustfs/rustfs:latest
     container_name: Devion-storage
     restart: unless-stopped
-    entrypoint: [ "/usr/local/bin/rustfs", "--console-enable", "/data" ]
     ports:
       - "${S3_PORT:-9000}:9000"          # S3 API Endpunkt
       - "${CONSOLE_PORT:-9001}:9001"    # RustFS Web-Konsole
