@@ -1,6 +1,9 @@
 import { integer, pgTable, varchar, timestamp, text, boolean } from "drizzle-orm/pg-core";
 
 
+export const DEVION_DIR = ".devion";
+export const ACTION_FILES = [`${DEVION_DIR}/action.yml`, `${DEVION_DIR}/action.yaml`] as const; 
+
 export const timestamps = {
   updated_at: timestamp(),
   created_at: timestamp().defaultNow().notNull(),
@@ -47,20 +50,34 @@ export const system_feature_log = pgTable("system_feature_log", {
 
 
 
+// Queue für anstehende Jobs
 export const buildQueue = pgTable("build_queue", {
   id: text("id").primaryKey(),
   imageName: text("image_name").notNull(),
-  zipBase64: text("zip_base64").notNull(), // Zip-Datei direkt in der DB (oder Pfad/S3)
-  dockerfile: text("dockerfile").default("Dockerfile").notNull(),
+  sourceType: text("source_type", { enum: ["ZIP", "GIT"] }).notNull(),
+  zipBase64: text("zip_base64"),
+  gitUrl: text("git_url"),
+  workflowYaml: text("workflow_yaml"),
   status: text("status", { enum: ["PENDING", "PROCESSING"] }).default("PENDING").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// History aller vergangenen Builds
 export const buildHistory = pgTable("build_history", {
   id: text("id").primaryKey(),
   imageName: text("image_name").notNull(),
-  status: text("status", { enum: ["SUCCESS", "FAILED"] }).notNull(),
+  status: text("status", { enum: ["SUCCESS", "FAILED", "TIMEOUT"] }).notNull(),
   logs: text("logs").notNull(),
   durationMs: integer("duration_ms").notNull(),
   completedAt: timestamp("completed_at").defaultNow().notNull(),
 });
+
+// NEU: Tabelle für den API-Server zum Hosten bereitstehender Apps
+export const hostedApps = pgTable("hosted_apps", {
+  id: text("id").primaryKey(),               // Z.B. App-ID oder Build-ID
+  imageName: text("image_name").notNull(),    // Das fertige Docker-Image
+  containerStatus: text("container_status", { enum: ["READY", "RUNNING", "STOPPED"] }).default("READY").notNull(),
+  deployedAt: timestamp("deployed_at").defaultNow().notNull(),
+});
+
+export type BuildJob = typeof buildQueue.$inferSelect;
