@@ -1,36 +1,44 @@
+import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { buildQueue, buildHistory, hostedApps, type BuildJob } from "./schema";
 import { eq, sql } from "drizzle-orm";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { unzipper } from "unzipper"; // bun add unzipper
-import { buildQueue, buildHistory } from "./schema";
+import { executeDevionAction } from "./workflow-runner";
 
-const client = postgres(process.env.DATABASE_URL!);
-const db = drizzle(client);
+const app = new Hono();
+const db = drizzle(postgres(process.env.DATABASE_URL!, { max: 5 }));
+const TMP_BASE = join(import.meta.dir, ".builder-tmp");
 
-const TMP_BASE = join(import.meta.dir, ".worker-builds");
+// Steuerungs-State für den Worker
+let isWorkerRunning = false;
 
-async function runWorker() {
-  console.log("👷 Empfänger-Worker gestartet. Warte auf neue Jobs in der Queue...");
+// --- WORKER LOGIK ---
 
-  while (true) {
+async function runBuilder() {
+  console.log("👷 Builder-Server aktiv. Warte auf Arbeit...");
+  await mkdir(TMP_BASE, { recursive: true });
+  isWorkerRunning = true;
+
+  while (isWorkerRunning) {
     try {
-      // 1. Nächsten freien Job abholen und direkt für andere Worker sperren
+      // Thread-sicher den nächsten Job reservieren (FOR UPDATE SKIP LOCKED)
       const job = await db.transaction(async (tx) => {
-        const result = await tx.execute(sql`
-          SELECT * FROM build_queue
+        const rows = await tx.execute<BuildJob>(sql`
+          SELECT 
+            id, image_name AS "imageName", source_type AS "sourceType",
+            zip_base64 AS "zipBase64", git_url AS "gitUrl", workflow_yaml AS "workflowYaml"
+          FROM build_queue
           WHERE status = 'PENDING'
           ORDER BY created_at ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         `);
 
-        if (result.length === 0) return null;
+        if (rows.length === 0) return null;
+        const nextJob = rows[0];
 
-        const nextJob = result[0] as typeof buildQueue.$inferSelect;
-
-        // Job für die Bearbeitung reservieren
         await tx.update(buildQueue)
           .set({ status: "PROCESSING" })
           .where(eq(buildQueue.id, nextJob.id));
@@ -38,62 +46,105 @@ async function runWorker() {
         return nextJob;
       });
 
-      // Wenn die Queue leer ist -> 2 Sekunden schlafen
       if (!job) {
         await Bun.sleep(2000);
         continue;
       }
 
-      console.log(`🔨 Starte Build für Job-ID: ${job.id} (Image: ${job.imageName})`);
-      const startTime = Date.now();
+      console.log(`🔨 Builder verarbeitet Job ${job.id} ('${job.imageName}')`);
+      await processBuild(job);
 
-      // 2. Temporären Ordner anlegen & Zip entpacken
-      const workDir = join(TMP_BASE, job.id);
-      const contextDir = join(workDir, "context");
-      await mkdir(contextDir, { recursive: true });
-
-      const zipBuffer = Buffer.from(job.zipBase64, "base64");
-      const directory = await unzipper.Open.buffer(zipBuffer);
-      await directory.extract({ path: contextDir });
-
-      // 3. Docker-Build ausführen
-      const dockerProc = Bun.spawn([
-        "docker", "build",
-        "-t", job.imageName,
-        "-f", join(contextDir, job.dockerfile),
-        contextDir
-      ], { stdout: "pipe", stderr: "pipe" });
-
-      const stdout = await new Response(dockerProc.stdout).text();
-      const stderr = await new Response(dockerProc.stderr).text();
-      const exitCode = await dockerProc.exited;
-
-      const isSuccess = exitCode === 0;
-      const durationMs = Date.now() - startTime;
-      const combinedLogs = stdout + "\n" + stderr;
-
-      // 4. In Fertig-Tabelle eintragen & aus Queue löschen (in einer Transaktion)
-      await db.transaction(async (tx) => {
-        await tx.insert(buildHistory).values({
-          id: job.id,
-          imageName: job.imageName,
-          status: isSuccess ? "SUCCESS" : "FAILED",
-          logs: combinedLogs,
-          durationMs,
-        });
-
-        await tx.delete(buildQueue).where(eq(buildQueue.id, job.id));
-      });
-
-      // 5. Aufräumen
-      await rm(workDir, { recursive: true, force: true });
-      console.log(`✅ Job ${job.id} beendet mit Status: ${isSuccess ? "SUCCESS" : "FAILED"}`);
-
-    } catch (error) {
-      console.error("❌ Fehler im Empfänger-Worker:", error);
-      await Bun.sleep(5000); // Bei Fehler kurz pausieren
+    } catch (err) {
+      console.error("❌ Builder-Fehler:", err);
+      await Bun.sleep(3000);
     }
   }
 }
 
-runWorker();
+async function processBuild(job: BuildJob) {
+  const startTime = Date.now();
+  const workDir = join(TMP_BASE, job.id);
+  const contextDir = join(workDir, "context");
+
+  let isSuccess = false;
+  let logs = "";
+
+  try {
+    await mkdir(contextDir, { recursive: true });
+
+    // Quellcode beschaffen
+    if (job.sourceType === "GIT" && job.gitUrl) {
+      const git = Bun.spawn(["git", "clone", "--depth", "1", job.gitUrl, contextDir]);
+      await git.exited;
+    } else if (job.sourceType === "ZIP" && job.zipBase64) {
+      /* ZIP Entpack-Logik */
+    }
+
+    // Action ausführen (.devion/action.yml)
+    const result = await executeDevionAction(job.workflowYaml || "", {
+      workDir: contextDir,
+      imageName: job.imageName,
+      env: { IMAGE_NAME: job.imageName },
+    });
+
+    isSuccess = result.success;
+    logs = result.logs;
+
+  } catch (err: unknown) {
+    isSuccess = false;
+    logs = err instanceof Error ? err.message : String(err);
+  } finally {
+    const durationMs = Date.now() - startTime;
+
+    await db.transaction(async (tx) => {
+      await tx.insert(buildHistory).values({
+        id: job.id,
+        imageName: job.imageName,
+        status: isSuccess ? "SUCCESS" : "FAILED",
+        logs,
+        durationMs,
+      });
+
+      if (isSuccess) {
+        await tx.insert(hostedApps).values({
+          id: job.id,
+          imageName: job.imageName,
+          containerStatus: "READY",
+        });
+      }
+
+      await tx.delete(buildQueue).where(eq(buildQueue.id, job.id));
+    });
+
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    console.log(`✅ Build [${job.id}] fertig: ${isSuccess ? "Erfolg" : "Fehler"}`);
+  }
+}
+
+// --- HONO ROUTES ---
+
+// Healthcheck & Status des Builders
+app.get("/health", (c) => {
+  return c.json({
+    status: "ok",
+    workerRunning: isWorkerRunning,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Builder manuell starten/stoppen (optional)
+app.post("/worker/start", (c) => {
+  if (!isWorkerRunning) {
+    runBuilder();
+    return c.json({ message: "Worker gestartet" });
+  }
+  return c.json({ message: "Worker läuft bereits" });
+});
+
+// Startet den Worker automatisch beim Booten der Anwendung
+runBuilder();
+
+export default {
+  port: Number(process.env.PORT) || 3001,
+  fetch: app.fetch,
+};
