@@ -10,7 +10,6 @@
        "@/*": ["./src/*"],
        "@devion/env/server":["../env"]
     }
-    "outDir": "dist"
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],
   "exclude": ["node_modules", "**/*.test.ts", "**/*.spec.ts"]

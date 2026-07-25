@@ -1,15 +1,9 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "types": ["bun"],
     "esModuleInterop": true,
     "noEmit": true, 
-    "composite": true,
-    "outDir": "dist",
-    "paths": {
-       "@/*": ["./src/*"],
-       "@devion/env/server":["../env"]
-    }
     "outDir": "dist"
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],

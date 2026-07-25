@@ -20,5 +20,10 @@
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "typescript": "^5.9.3"
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "jose": "^6.2.3"
   }
 }
