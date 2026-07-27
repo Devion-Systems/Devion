@@ -1,5 +1,5 @@
 {
-  "name": "@devion/api",
+  "name": "@repo/api",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
