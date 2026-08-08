@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono';
-import type { auth } from '../auth'; // your better-auth 
+import type { auth } from '@repo/auth'; // your better-auth 
 export interface RateLimitStore {
 
   increment(key: string, windowMs: number): Promise<{ count: number; resetAt: number }>;

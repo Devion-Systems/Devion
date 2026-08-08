@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@repo/core": "workspace:*",
+    "@repo/email": "workspace:*",
+    "@repo/feature": "workspace:*",
     "@repo/infrastructure": "workspace:*",
     "better-auth": "^1.6.23",
     "pino": "^10.3.1",

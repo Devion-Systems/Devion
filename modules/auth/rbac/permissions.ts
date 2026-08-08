@@ -1,4 +1,4 @@
-import type { Brand } from "@devion/core";
+import type { Brand } from "@repo/core";
 
 export type Role = "owner" | "admin" | "member" | "viewer" | "agent";
 

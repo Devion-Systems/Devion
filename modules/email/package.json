@@ -1,18 +1,27 @@
 {
-  "name": "@repo/builder",
+  "name": "@repo/email",
   "version": "1.0.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
   "scripts": {
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.12.30",
+    "@repo/core": "workspace:*",
+    "@repo/feature": "workspace:*",
+    "nodemailer": "^6.10.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
+    "@types/nodemailer": "^6.4.17",
     "typescript": "^5.9.3"
-}
+  }
 }

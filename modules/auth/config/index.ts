@@ -3,9 +3,11 @@ import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor, admin, organization   } from "better-auth/plugins";
 
-import { env } from "@repo/env";
-import { db } from "@repo/storage";
-import { sendEmail } from './email/email.js';
+import { parseEnv } from "@repo/core";
+import { db } from "@repo/infrastructure";
+import { sendEmail } from "@repo/email";
+
+const env = parseEnv();
 
 export const auth = betterAuth({
     database: drizzleAdapter(db,{

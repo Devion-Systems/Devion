@@ -3,14 +3,12 @@
   "compilerOptions": {
     "types": ["bun"],
     "esModuleInterop": true,
-    "noEmit": true, 
+    "noEmit": true,
     "composite": true,
     "outDir": "dist",
     "paths": {
-       "@/*": ["./src/*"],
-       "@devion/env/server":["../env"]
+       "@/*": ["./src/*"]
     }
-    "outDir": "dist"
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],
   "exclude": ["node_modules", "**/*.test.ts", "**/*.spec.ts"]

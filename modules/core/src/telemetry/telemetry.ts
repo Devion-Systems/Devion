@@ -2,6 +2,18 @@ import type { Context } from "hono";
 import type { Logger } from "pino";
 import { SystemWatcher, type SystemSnapshot } from "../system/system.js";
 import { AppError, ErrorCode } from "../error/app-errors.js";
+import {
+  metrics,
+  type Meter,
+  type Counter,
+  type ObservableGauge,
+  type Histogram,
+} from "@opentelemetry/api";
+import {
+  MeterProvider,
+  MetricReader,
+  DataPointType,
+} from "@opentelemetry/sdk-metrics";
 
 export type MetricLabels = Record<string, string | number | boolean>;
 
@@ -40,19 +52,34 @@ function keyFor(name: string, labels?: MetricLabels): string {
 }
 
 /**
- * In-process metrics + system telemetry. Not a Prometheus/OTel replacement —
- * a lightweight collector you can expose over HTTP and/or push to one via `exporter`.
+ * A specification-compliant helper reader to collect metrics in-memory.
+ */
+class InMemoryMetricReader extends MetricReader {
+  protected async onForceFlush(): Promise<void> {}
+  protected async onShutdown(): Promise<void> {}
+}
+
+/**
+ * OpenTelemetry-backed metrics + system telemetry. Exposes collected metrics
+ * over HTTP and/or pushes them to a custom exporter.
  */
 export class Telemetry {
   private logger?: Logger;
   private watcher: SystemWatcher;
-  private counters = new Map<string, number>();
-  private gauges = new Map<string, number>();
-  private histograms = new Map<string, HistogramData>();
   private history: SystemSnapshot[] = [];
   private historySize: number;
   private timer?: ReturnType<typeof setInterval>;
   private exporter?: TelemetryOptions["exporter"];
+
+  // OpenTelemetry components
+  private provider: MeterProvider;
+  private reader: InMemoryMetricReader;
+  private meter: Meter;
+  
+  private otelCounters = new Map<string, Counter>();
+  private otelHistograms = new Map<string, Histogram>();
+  private otelGauges = new Map<string, ObservableGauge>();
+  private gaugeValues = new Map<string, { name: string; value: number; labels: MetricLabels }>();
 
   constructor(opts: TelemetryOptions = {}) {
     this.logger = opts.logger;
@@ -60,32 +87,90 @@ export class Telemetry {
     this.historySize = opts.historySize ?? 120;
     this.exporter = opts.exporter;
 
+    // Initialize OpenTelemetry Metrics SDK
+    this.reader = new InMemoryMetricReader();
+    this.provider = new MeterProvider({
+      readers: [this.reader],
+    });
+    this.meter = this.provider.getMeter("devion-core");
+
     const interval = opts.sampleIntervalMs ?? 30_000;
     if (interval > 0) this.start(interval);
+  }
+
+  // --- OpenTelemetry Collector helper ---
+
+  private async collectMetrics() {
+    const counters = new Map<string, number>();
+    const gauges = new Map<string, number>();
+    const histograms = new Map<string, HistogramData>();
+
+    const collectionResult = await this.reader.collect();
+    if (collectionResult.resourceMetrics) {
+      for (const scopeMetrics of collectionResult.resourceMetrics.scopeMetrics) {
+        for (const metric of scopeMetrics.metrics) {
+          const name = metric.descriptor.name;
+          
+          for (const point of metric.dataPoints) {
+            const labels = point.attributes as MetricLabels;
+            const key = keyFor(name, labels);
+
+            if (metric.dataPointType === DataPointType.SUM) {
+              counters.set(key, point.value as number);
+            } else if (metric.dataPointType === DataPointType.GAUGE) {
+              gauges.set(key, point.value as number);
+            } else if (metric.dataPointType === DataPointType.HISTOGRAM) {
+              const val = point.value as any;
+              histograms.set(key, {
+                count: val.count ?? 0,
+                sum: val.sum ?? 0,
+                min: val.min ?? 0,
+                max: val.max ?? 0,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return { counters, gauges, histograms };
   }
 
   // --- metrics -----------------------------------------------------------
 
   incrementCounter(name: string, value = 1, labels?: MetricLabels): void {
-    const key = keyFor(name, labels);
-    this.counters.set(key, (this.counters.get(key) ?? 0) + value);
+    let counter = this.otelCounters.get(name);
+    if (!counter) {
+      counter = this.meter.createCounter(name);
+      this.otelCounters.set(name, counter);
+    }
+    counter.add(value, labels);
   }
 
-  setGauge(name: string, value: number, labels?: MetricLabels): void {
-    this.gauges.set(keyFor(name, labels), value);
+  setGauge(name: string, value: number, labels: MetricLabels = {}): void {
+    const key = keyFor(name, labels);
+    this.gaugeValues.set(key, { name, value, labels });
+
+    if (!this.otelGauges.has(name)) {
+      const gauge = this.meter.createObservableGauge(name);
+      gauge.addCallback((result) => {
+        for (const [_, g] of this.gaugeValues.entries()) {
+          if (g.name === name) {
+            result.observe(g.value, g.labels);
+          }
+        }
+      });
+      this.otelGauges.set(name, gauge);
+    }
   }
 
   recordHistogram(name: string, value: number, labels?: MetricLabels): void {
-    const key = keyFor(name, labels);
-    const existing = this.histograms.get(key);
-    if (!existing) {
-      this.histograms.set(key, { count: 1, sum: value, min: value, max: value });
-      return;
+    let histogram = this.otelHistograms.get(name);
+    if (!histogram) {
+      histogram = this.meter.createHistogram(name);
+      this.otelHistograms.set(name, histogram);
     }
-    existing.count += 1;
-    existing.sum += value;
-    existing.min = Math.min(existing.min, value);
-    existing.max = Math.max(existing.max, value);
+    histogram.record(value, labels);
   }
 
   /** Records an AppError occurrence as a labeled counter — wire into your error handler's onError. */
@@ -118,7 +203,7 @@ export class Telemetry {
       try {
         const snapshot = await this.sampleNow();
         if (this.exporter) {
-          await this.exporter(this.buildExportEvent(snapshot));
+          await this.exporter(await this.buildExportEvent(snapshot));
         }
       } catch (err) {
         this.logger?.warn({ err }, "Telemetry sample/export failed");
@@ -136,13 +221,14 @@ export class Telemetry {
     return [...this.history];
   }
 
-  private buildExportEvent(snapshot: SystemSnapshot): TelemetryExportEvent {
+  private async buildExportEvent(snapshot: SystemSnapshot): Promise<TelemetryExportEvent> {
+    const collected = await this.collectMetrics();
     return {
       timestamp: snapshot.timestamp,
       system: snapshot,
-      counters: Object.fromEntries(this.counters),
-      gauges: Object.fromEntries(this.gauges),
-      histograms: Object.fromEntries(this.histograms),
+      counters: Object.fromEntries(collected.counters),
+      gauges: Object.fromEntries(collected.gauges),
+      histograms: Object.fromEntries(collected.histograms),
     };
   }
 
@@ -151,24 +237,25 @@ export class Telemetry {
     if (!this.exporter) return;
     const latest = this.history.at(-1) ?? (await this.sampleNow());
     try {
-      await this.exporter(this.buildExportEvent(latest));
+      await this.exporter(await this.buildExportEvent(latest));
     } catch (err) {
       throw new AppError("Telemetry export failed", ErrorCode.TELEMETRY_EXPORT_FAILED, 500, { cause: err });
     }
   }
 
   /** Snapshot of current metrics state, without triggering a new system sample. */
-  toJSON() {
+  async toJSON() {
+    const collected = await this.collectMetrics();
     return {
-      counters: Object.fromEntries(this.counters),
-      gauges: Object.fromEntries(this.gauges),
-      histograms: Object.fromEntries(this.histograms),
+      counters: Object.fromEntries(collected.counters),
+      gauges: Object.fromEntries(collected.gauges),
+      histograms: Object.fromEntries(collected.histograms),
       lastSystemSnapshot: this.history.at(-1) ?? null,
     };
   }
 
   /** Hono handler: `app.get("/telemetry", telemetry.handler())` */
   handler() {
-    return (c: Context) => c.json(this.toJSON());
+    return async (c: Context) => c.json(await this.toJSON());
   }
 }
