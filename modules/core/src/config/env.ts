@@ -14,6 +14,13 @@ const coreEnvSchema = z.object({
   S3_REGION: z.string().default("auto"),
   BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET muss mindestens 32 Zeichen lang sein"),
   BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL muss eine gültige URL sein"),
+  // SMTP / Email-Service (optional – wird per Feature-Flag gesteuert)
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  SMTP_SECURE: z.string().transform((v) => v === "true").default(false),
 });
 
 export type CoreEnv = z.infer<typeof coreEnvSchema>;
