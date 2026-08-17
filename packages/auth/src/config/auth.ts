@@ -82,6 +82,12 @@ export const auth = betterAuth({
            ipv6Subnet: 56,
       },
     },
+    session: {
+    cookieCache: {
+      enabled: true,
+      maxAge: 5 * 60, // Cache duration in seconds
+    },
+  },
     plugins:[
       twoFactor(),
       admin(),

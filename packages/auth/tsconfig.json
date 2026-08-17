@@ -11,6 +11,6 @@
        "@devion/env/server":["../env"]
     }
   },
-  "include": ["config/**/*.ts", "rbac/**/*.ts", "index.ts"],
+  "include": ["src/config/**/*.tssrc/rbac/**/*.ts*.ts", "index.ts"],
   "exclude": ["node_modules", "**/*.test.ts", "**/*.spec.ts"]
 }
