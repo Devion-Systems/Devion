@@ -1,6 +1,6 @@
 import { AppError, ErrorCode, getLogger } from "@repo/core";
 import { CreateVmOptions, VmInstance, VmStatus } from "../types.ts";
-import { vmPool } from "./vm-pool.ts";
+import { vmPool } from "./vm-pool.js";
 import { config } from "../config.ts";
 import { FirecrackerApiClient } from "../client/firecracker-api.ts";
 import { RootfsBuilder } from "../image/rootfs-builder.ts";

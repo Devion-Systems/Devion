@@ -1,4 +1,3 @@
-# Devion Infrastructure Module (`@repo/infrastructure`)
 
 Das `@repo/infrastructure`-Modul bildet das Rückgrat der Devion On-Premise Hosting-Plattform. Es konsolidiert alle **Storage-** (Datenbank, Blob Object Storage, Container Registry) und **Netzwerk-Subsysteme** (DNS, Traefik Reverse Proxy) in einer gemeinsamen, Enterprise-fähigen Architektur.
 

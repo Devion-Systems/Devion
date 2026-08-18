@@ -1,4 +1,4 @@
-import { db, system_feature } from "@repo/infrastructure";
+import { db, system_feature } from "@repo/db";
 import { defaultFeatures } from "./features.config.js";
 import { notInArray } from "drizzle-orm";
 

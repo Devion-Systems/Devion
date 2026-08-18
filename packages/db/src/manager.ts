@@ -1,7 +1,7 @@
-import { checkDbHealth } from "./storage/database/db.js";
-import { blobStorage } from "./storage/blob/client.js";
-import { dockerRegistry } from "./storage/registry/index.js";
 import { getLogger } from "@repo/core";
+import { blobStorage } from "./blob/client.js";
+import { checkDbHealth } from "./database/db.js";
+import { dockerRegistry } from "./registry/index.js";
 
 export interface InfrastructureHealthReport {
   status: "ok" | "degraded" | "error";
@@ -39,7 +39,10 @@ export async function checkInfrastructureHealth(): Promise<InfrastructureHealthR
   try {
     const registryOk = await dockerRegistry.ping();
     if (!registryOk) {
-      report.dockerRegistry = { status: "error", error: "Docker Registry ping returned non-200 status" };
+      report.dockerRegistry = {
+        status: "error",
+        error: "Docker Registry ping returned non-200 status",
+      };
       report.status = "degraded";
     }
   } catch (err: any) {
