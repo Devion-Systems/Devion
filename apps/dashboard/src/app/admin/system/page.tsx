@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, CircleDotDashed, Database, Server } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 
@@ -22,6 +23,30 @@ const services = [
 ];
 
 export default function AdminSystemPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "analytics", "overview"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/analytics/overview`,
+        { credentials: "include" },
+      );
+      if (!response.ok)
+        throw new Error("Systemanalysen konnten nicht geladen werden.");
+      return response.json() as Promise<{
+        totals: Record<string, number>;
+        services: {
+          database: { status: string; latencyMs: number };
+          registry: string;
+          storage: string;
+        };
+      }>;
+    },
+  });
+  const serviceState: Record<string, string> = {
+    "API Gateway": "ok",
+    "Control Database": data?.services.database.status ?? "unknown",
+    "Build Queue": data?.services.registry ?? "unknown",
+  };
   return (
     <div className="space-y-6 p-5 sm:p-7">
       <PageHeader
@@ -46,11 +71,29 @@ export default function AdminSystemPage() {
             </p>
             <div className="mt-5 flex items-center gap-2 border-t border-white/[0.05] pt-3 text-xs text-[#81ecec]">
               <span className="devion-status-dot h-1.5 w-1.5 rounded-full bg-[#00cec9]" />
-              Keine Störungen
+              {isLoading
+                ? "Wird geprüft …"
+                : serviceState[name] === "ok"
+                  ? "Operational"
+                  : "Prüfung erforderlich"}
             </div>
           </article>
         ))}
       </div>
+      <section className="grid gap-4 rounded-2xl border border-white/[0.07] bg-[#172128]/90 p-5 sm:grid-cols-3">
+        {[
+          { label: "Aktive Nutzer (30 Tage)", value: data?.totals.activeUsers },
+          { label: "Organisationen", value: data?.totals.organizations },
+          { label: "Projekte", value: data?.totals.projects },
+        ].map((metric) => (
+          <div key={metric.label}>
+            <p className="text-xs text-zinc-500">{metric.label}</p>
+            <p className="mt-2 text-2xl font-bold text-zinc-100">
+              {isLoading ? "—" : (metric.value ?? 0)}
+            </p>
+          </div>
+        ))}
+      </section>
     </div>
   );
 }

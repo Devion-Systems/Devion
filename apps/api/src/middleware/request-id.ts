@@ -1,6 +1,6 @@
+import type { RequestId } from "@repo/core";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../types/env.js";
-import type { RequestId } from "@repo/core";
 
 /**
  * Extracts or generates a unique request ID for every incoming request.

@@ -2,23 +2,18 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { Organization } from "@/features/organizations/types";
+import { authClient } from "@/lib/auth-client";
 
 export function useUserOrganizations() {
   return useQuery({
     queryKey: ["organizations"],
     queryFn: async (): Promise<Organization[]> => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
-      const response = await fetch(`${baseUrl}/organizations`, {
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        throw new Error("Organisationen konnten nicht geladen werden.");
-      }
-
-      const data: Organization[] | { organizations: Organization[] } =
-        await response.json();
-      return Array.isArray(data) ? data : data.organizations;
+      const { data, error } = await authClient.organization.list();
+      if (error)
+        throw new Error(
+          error.message ?? "Organisationen konnten nicht geladen werden.",
+        );
+      return (data ?? []).map(({ id, name, slug }) => ({ id, name, slug }));
     },
   });
 }

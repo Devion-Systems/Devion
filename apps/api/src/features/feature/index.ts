@@ -1,7 +1,5 @@
-import { db, system_feature } from "@repo/infrastructure";
+import { db, system_feature } from "@repo/db";
 import { eq } from "drizzle-orm";
-
-
 
 export async function isFeatureEnabled(featureName: string): Promise<boolean> {
   const result = await db
@@ -10,13 +8,9 @@ export async function isFeatureEnabled(featureName: string): Promise<boolean> {
     .where(eq(system_feature.name, featureName))
     .limit(1);
 
-  return result[0]?.isActive ?? false; 
+  return result[0]?.isActive ?? false;
 }
 
 export async function setFeatureStatus(name: string, active: boolean) {
-  await db
-    .update(system_feature)
-    .set({ isActive: active })
-    .where(eq(system_feature.name, name));
+  await db.update(system_feature).set({ isActive: active }).where(eq(system_feature.name, name));
 }
-

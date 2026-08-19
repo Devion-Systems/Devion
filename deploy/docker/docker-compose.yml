@@ -49,6 +49,7 @@ services:
       # Hier greifen wir sauber auf deine System-Pfade aus der Installation zu
       - /opt/devion/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - /opt/devion/traefik/dynamic:/etc/traefik/dynamic:ro
+      - /opt/devion/traefik/certs:/etc/traefik/certs:ro
       - /opt/devion/certs:/letsencrypt
     networks:
       - Devion-Core-Network

@@ -139,6 +139,7 @@ export const adminNavGroups: NavGroup[] = [
     items: [
       { label: 'System-Health', href: '/admin/system', icon: Gauge },
       { label: 'Audit Log', href: '/admin/logs', icon: ScrollText },
+      { label: 'TLS-Zertifikate', href: '/admin/settings/certificates', icon: ShieldCheck },
       { label: 'Einstellungen', href: '/admin/settings/plans', icon: Settings },
     ],
   },

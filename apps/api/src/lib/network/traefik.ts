@@ -1,92 +1,132 @@
-import fs from 'fs/promises';
-import path from 'path';
-import YAML from 'yaml';
+import fs from "node:fs/promises";
+import path from "node:path";
 
-export interface RouteTarget {
-  id: string;        // Eindeutige ID (z. B. Projekt- oder Deployment-ID)
-  targetUrl: string; // Die interne IP/URL der Firecracker VM oder des Containers (z.B. http://10.0.0.45:8080)
+export type TraefikDomain = {
+  id: string;
+  hostname: string;
+};
+
+export type ProjectRouteTarget = {
+  projectId: string;
+  projectSlug: string;
+  targetUrl: string;
+};
+
+export type TraefikSettings = {
+  dynamicConfigDir: string;
+  httpEntryPoint: string;
+  httpsEntryPoint: string;
+  certResolver: string;
+  internalDomain: string;
+};
+
+const safeIdentifier = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "-");
+const hostnamePattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+function assertHostname(hostname: string) {
+  const normalized = hostname.trim().toLowerCase();
+  if (!hostnamePattern.test(normalized)) throw new Error("Invalid Traefik hostname");
+  return normalized;
 }
 
+function assertUpstream(url: string) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Traefik upstream must use HTTP or HTTPS");
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("Traefik upstream must be a bare internal service URL");
+  }
+  return parsed.toString().replace(/\/$/, "");
+}
+
+/**
+ * Writes Traefik file-provider configuration. Only server-owned deployment
+ * metadata may provide an upstream URL; customer input is limited to hostnames.
+ */
 export class TraefikManager {
-  private dynamicConfigDir: string;
+  private readonly settings: TraefikSettings;
 
-  constructor(dynamicConfigDir: string = '/opt/devion/traefik/dynamic') {
-    this.dynamicConfigDir = dynamicConfigDir;
-  }
-
-  /**
-   * Erstellt eine interne Route unter *.devion.local mit selbstsigniertem SSL
-   */
-  async createInternalRoute(target: RouteTarget, subdomain: string): Promise<void> {
-    const filename = `${target.id}-internal.yml`;
-    const config = {
-      http: {
-        routers: {
-          [`router-${target.id}-internal`]: {
-            rule: `Host(\`${subdomain}.devion.local\`)`,
-            entryPoints: ['websecure'],
-            service: `service-${target.id}`,
-            tls: {}
-          }
-        },
-        services: {
-          [`service-${target.id}`]: {
-            loadBalancer: {
-              servers: [{ url: target.targetUrl }]
-            }
-          }
-        }
-      }
+  constructor(settings: Partial<TraefikSettings> = {}) {
+    this.settings = {
+      dynamicConfigDir:
+        settings.dynamicConfigDir ??
+        process.env.TRAEFIK_DYNAMIC_CONFIG_DIR ??
+        "/opt/devion/traefik/dynamic",
+      httpEntryPoint: settings.httpEntryPoint ?? process.env.TRAEFIK_HTTP_ENTRYPOINT ?? "web",
+      httpsEntryPoint:
+        settings.httpsEntryPoint ?? process.env.TRAEFIK_HTTPS_ENTRYPOINT ?? "websecure",
+      certResolver: settings.certResolver ?? process.env.TRAEFIK_CERT_RESOLVER ?? "le-kunden",
+      internalDomain: assertHostname(
+        settings.internalDomain ?? process.env.TRAEFIK_INTERNAL_DOMAIN ?? "devion.local",
+      ),
     };
-
-    await this.writeYaml(filename, config);
   }
 
-  /**
-   * Erstellt eine externe Kunden-Route mit automatischer Let's Encrypt Validierung
-   */
-  async createCustomerRoute(target: RouteTarget, customDomain: string): Promise<void> {
-    const filename = `${target.id}-custom.yml`;
-    const config = {
+  /** Reconciles every hostname of a project into one atomically-written file. */
+  async syncProjectRoutes(target: ProjectRouteTarget, domains: TraefikDomain[]): Promise<void> {
+    const projectKey = safeIdentifier(target.projectId);
+    const serviceName = `project-${projectKey}`;
+    const targetUrl = assertUpstream(target.targetUrl);
+    const internalHostname = assertHostname(
+      `${safeIdentifier(target.projectSlug)}.${this.settings.internalDomain}`,
+    );
+    const hostnames = [
+      { id: "internal", hostname: internalHostname, useCertificateResolver: false },
+      ...domains.map((domain) => ({
+        id: safeIdentifier(domain.id),
+        hostname: assertHostname(domain.hostname),
+        useCertificateResolver: true,
+      })),
+    ];
+    const routers: Record<string, unknown> = {};
+
+    for (const domain of hostnames) {
+      const routeKey = `${projectKey}-${domain.id}`;
+      const httpsRouter: Record<string, unknown> = {
+        rule: `Host(\`${domain.hostname}\`)`,
+        entryPoints: [this.settings.httpsEntryPoint],
+        service: serviceName,
+        tls: domain.useCertificateResolver ? { certResolver: this.settings.certResolver } : {},
+      };
+      routers[`https-${routeKey}`] = httpsRouter;
+      routers[`http-${routeKey}`] = {
+        rule: `Host(\`${domain.hostname}\`)`,
+        entryPoints: [this.settings.httpEntryPoint],
+        middlewares: ["redirect-to-https"],
+        service: serviceName,
+      };
+    }
+
+    await this.writeConfig(`project-${projectKey}.json`, {
       http: {
-        routers: {
-          [`router-${target.id}-custom`]: {
-            rule: `Host(\`${customDomain}\`, \`www.${customDomain}\`)`,
-            entryPoints: ['websecure'],
-            service: `service-${target.id}`,
-            tls: {
-              certResolver: 'le-kunden'
-            }
-          }
+        middlewares: {
+          "redirect-to-https": { redirectScheme: { scheme: "https", permanent: true } },
         },
-        services: {
-          [`service-${target.id}`]: {
-            loadBalancer: {
-              servers: [{ url: target.targetUrl }]
-            }
-          }
-        }
-      }
-    };
-
-    await this.writeYaml(filename, config);
+        routers,
+        services: { [serviceName]: { loadBalancer: { servers: [{ url: targetUrl }] } } },
+      },
+    });
   }
 
-  /**
-   * Löscht alle Routing-Dateien eines Projekts, wenn die App gestoppt oder gelöscht wird
-   */
-  async removeRoutes(targetId: string): Promise<void> {
-    const internalPath = path.join(this.dynamicConfigDir, `${targetId}-internal.yml`);
-    const customPath = path.join(this.dynamicConfigDir, `${targetId}-custom.yml`);
-
-    await fs.rm(internalPath, { force: true });
-    await fs.rm(customPath, { force: true });
+  async removeProjectRoutes(projectId: string): Promise<void> {
+    const filename = `project-${safeIdentifier(projectId)}.json`;
+    await fs.rm(path.join(this.settings.dynamicConfigDir, filename), { force: true });
   }
 
-  private async writeYaml(filename: string, data: any): Promise<void> {
-    await fs.mkdir(this.dynamicConfigDir, { recursive: true });
-    const filePath = path.join(this.dynamicConfigDir, filename);
-    const yamlString = YAML.stringify(data);
-    await fs.writeFile(filePath, yamlString, 'utf8');
+  private async writeConfig(filename: string, data: unknown): Promise<void> {
+    await fs.mkdir(this.settings.dynamicConfigDir, { recursive: true });
+    const destination = path.join(this.settings.dynamicConfigDir, filename);
+    const temporary = `${destination}.${crypto.randomUUID()}.tmp`;
+    // JSON is a supported Traefik file-provider format and avoids building YAML
+    // from runtime values.
+    await fs.writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+    await fs.rename(temporary, destination);
   }
 }

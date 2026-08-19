@@ -1,9 +1,12 @@
-import { Hono } from "hono";
-import { isFeatureEnabled, setFeatureStatus } from "@repo/feature";
 import { AppError, ErrorCode } from "@repo/core";
+import { Hono } from "hono";
+import { isFeatureEnabled, setFeatureStatus } from "../features/feature/index.js";
+import { requirePlatformAdmin } from "../middleware/auth.js";
 import type { AppEnv } from "../types/env.js";
 
 const features = new Hono<AppEnv>();
+
+features.use("/*", requirePlatformAdmin);
 
 /**
  * GET /:name — Check if a specific feature flag is enabled.

@@ -1,6 +1,6 @@
-import nodemailer, { type Transporter } from "nodemailer";
 import { parseEnv } from "@repo/core";
-import { isFeatureEnabled } from "@repo/feature";
+import nodemailer, { type Transporter } from "nodemailer";
+import { isFeatureEnabled } from "../feature/index.js";
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -34,10 +34,7 @@ function getTransporter(): Transporter | null {
     host: env.SMTP_HOST,
     port: env.SMTP_PORT,
     secure: env.SMTP_SECURE,
-    auth:
-      env.SMTP_USER && env.SMTP_PASS
-        ? { user: env.SMTP_USER, pass: env.SMTP_PASS }
-        : undefined,
+    auth: env.SMTP_USER && env.SMTP_PASS ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
   });
 
   return transporterInstance;

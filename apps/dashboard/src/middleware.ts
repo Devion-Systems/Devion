@@ -1,36 +1,49 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-const AUTH_ENABLED = false;
+const SESSION_COOKIE_NAMES = [
+  "__Secure-better-auth.session_token",
+  "better-auth.session_token",
+  // Compatibility with sessions issued by earlier Devion deployments.
+  "devion.session",
+];
+
+const PUBLIC_PATHS = [
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+  "/accept-invite",
+];
 
 export function middleware(request: NextRequest) {
-  const sessionCookie = request.cookies.get("devion.session")?.value;
   const path = request.nextUrl.pathname;
+  const hasSessionCookie = SESSION_COOKIE_NAMES.some((name) =>
+    Boolean(request.cookies.get(name)?.value)
+  );
+  const isPublicPath =
+    path === "/" ||
+    PUBLIC_PATHS.some(
+      (publicPath) => path === publicPath || path.startsWith(`${publicPath}/`),
+    );
 
-  const isAuthRoute =
-    path.startsWith("/login") ||
-    path.startsWith("/register") ||
-    path.startsWith("/forgot-password") ||
-    path.startsWith("/reset-password") ||
-    path.startsWith("/verify-email") ||
-    path.startsWith("/accept-invite");
-
-  // Auth während der Entwicklung deaktiviert
-  if (AUTH_ENABLED) {
-    if (!sessionCookie && !isAuthRoute) {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
-
-    if (path.startsWith("/admin")) {
-      const isPlatformAdmin = false;
-
-      if (!isPlatformAdmin) {
-        return NextResponse.redirect(new URL("/", request.url));
-      }
-    }
+  // This is intentionally only a coarse navigation guard. Authorization and
+  // platform-admin checks remain enforced by the API, where a cookie value is
+  // validated instead of merely checked for presence.
+  if (!hasSessionCookie && !isPublicPath) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", `${path}${request.nextUrl.search}`);
+    return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+
+  if (hasSessionCookie || !isPublicPath) {
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  }
+
+  return response;
 }
 
 export const config = {

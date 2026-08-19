@@ -50,6 +50,17 @@ const STATUS_MAP: Record<DeploymentStatus, { label: string; color: string; icon:
   pending: { label: 'Ausstehend', color: 'text-zinc-400', icon: Clock },
 }
 
+function getExternalProjectUrl(domain?: string): string | null {
+  if (!domain || /[/?#@\s]/.test(domain)) return null
+
+  try {
+    const url = new URL(`https://${domain}`)
+    return url.hostname === domain.toLowerCase() ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
 function useProjectOverview(orgSlug: string, projectId: string) {
   return useQuery<ProjectOverview>({
     queryKey: ['orgs', orgSlug, 'projects', projectId, 'overview'],
@@ -116,6 +127,7 @@ export default function ProjectDetailPage() {
 
   const statusCfg = STATUS_MAP[project.status]
   const StatusIcon = statusCfg.icon
+  const projectUrl = getExternalProjectUrl(project.domain)
 
   return (
     <div className="space-y-6 p-6">
@@ -128,9 +140,9 @@ export default function ProjectDetailPage() {
           <span className="text-sm text-zinc-500">{project.deployedAt}</span>
         </div>
         <div className="flex gap-2">
-          {project.domain && (
+          {projectUrl && (
             <Button variant="outline" size="sm" asChild>
-              <a href={`https://${project.domain}`} target="_blank" rel="noopener noreferrer" className="gap-1.5">
+              <a href={projectUrl} target="_blank" rel="noopener noreferrer" className="gap-1.5">
                 <ExternalLink className="h-3.5 w-3.5" />
                 {project.domain}
               </a>

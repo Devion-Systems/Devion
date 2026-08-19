@@ -1,0 +1,6 @@
+# Dynamic TLS policy loaded by Traefik's file provider.
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true

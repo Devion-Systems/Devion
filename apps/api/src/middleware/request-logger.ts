@@ -1,5 +1,5 @@
+import { childLogger, createLogger } from "@repo/core";
 import { createMiddleware } from "hono/factory";
-import { createLogger, childLogger } from "@repo/core";
 import type { AppEnv } from "../types/env.js";
 
 const baseLogger = createLogger("api");

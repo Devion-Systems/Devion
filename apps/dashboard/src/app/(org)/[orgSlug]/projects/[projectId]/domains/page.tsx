@@ -1,210 +1,352 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useParams } from 'next/navigation'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { PageHeader } from '@/components/layout/page-header'
-import { Button } from '@/components/ui/button'
-import { Globe, Lock, LockOpen, Plus, Trash2, CheckCircle2, Clock, AlertTriangle, RefreshCw } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CheckCircle2,
+  Globe,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useParams } from "next/navigation";
+import { useState } from "react";
+import { PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
 
-type DomainStatus = 'active' | 'pending' | 'failed'
+type DomainStatus = "active" | "pending" | "failed";
+type ProjectDomain = {
+  id: string;
+  hostname: string;
+  environment: string;
+  status: DomainStatus;
+  sslExpiresAt: string | null;
+  createdAt: string;
+};
 
-type Domain = {
-  id: string
-  domain: string
-  environment: string
-  status: DomainStatus
-  sslExpiry?: string
-  isCustom: boolean
-  addedAt: string
+const hostnamePattern =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+function isValidHostname(value: string) {
+  return hostnamePattern.test(value.trim().toLowerCase());
 }
 
-const STATUS_MAP: Record<DomainStatus, { label: string; color: string; icon: React.ElementType }> = {
-  active:  { label: 'Aktiv',         color: 'text-emerald-400', icon: CheckCircle2 },
-  pending: { label: 'DNS ausstehend',color: 'text-amber-400',   icon: Clock },
-  failed:  { label: 'Fehler',        color: 'text-red-400',     icon: AlertTriangle },
-}
-
-function useDomains(orgSlug: string, projectId: string) {
-  return useQuery<Domain[]>({
-    queryKey: ['orgs', orgSlug, 'projects', projectId, 'domains'],
-    queryFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-      const res = await fetch(
-        `${baseUrl}/organizations/${orgSlug}/projects/${projectId}/domains`,
-        { credentials: 'include' }
-      )
-      if (!res.ok) throw new Error('Domains nicht verfügbar')
-      return res.json()
-    },
-    placeholderData: [
-      { id: 'd1', domain: 'app.example.com',         environment: 'production', status: 'active',  sslExpiry: '2027-03-15', isCustom: true,  addedAt: '2025-12-01' },
-      { id: 'd2', domain: 'api.example.com',         environment: 'production', status: 'active',  sslExpiry: '2027-03-15', isCustom: true,  addedAt: '2025-12-01' },
-      { id: 'd3', domain: 'staging.example.com',     environment: 'staging',    status: 'pending', isCustom: true,  addedAt: '2026-08-17' },
-      { id: 'd4', domain: 'myproject.devion.app',    environment: 'production', status: 'active',  sslExpiry: '2027-08-01', isCustom: false, addedAt: '2025-11-20' },
-    ],
-  })
+function apiUrl(path: string) {
+  return `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 }
 
 export default function DomainsPage() {
-  const { orgSlug, projectId } = useParams<{ orgSlug: string; projectId: string }>()
-  const queryClient = useQueryClient()
-  const { data: domains = [], isLoading } = useDomains(orgSlug, projectId)
-  const [newDomain, setNewDomain] = useState('')
-  const [newEnv, setNewEnv] = useState('production')
-  const [showAdd, setShowAdd] = useState(false)
+  const { orgSlug, projectId } = useParams<{
+    orgSlug: string;
+    projectId: string;
+  }>();
+  const queryClient = useQueryClient();
+  const queryKey = ["orgs", orgSlug, "projects", projectId, "domains"] as const;
+  const [isCreating, setIsCreating] = useState(false);
+  const [editing, setEditing] = useState<ProjectDomain | null>(null);
+  const [hostname, setHostname] = useState("");
+  const [environment, setEnvironment] = useState("production");
+  const [formError, setFormError] = useState<string | null>(null);
 
-  function handleAdd() {
-    if (!newDomain.trim()) return
-    const newEntry: Domain = {
-      id: `tmp-${Date.now()}`,
-      domain: newDomain.trim(),
-      environment: newEnv,
-      status: 'pending',
-      isCustom: true,
-      addedAt: new Date().toISOString().slice(0, 10),
+  const domains = useQuery<ProjectDomain[]>({
+    queryKey,
+    queryFn: async () => {
+      const response = await fetch(
+        apiUrl(`/organizations/${orgSlug}/projects/${projectId}/domains`),
+        { credentials: "include" },
+      );
+      if (!response.ok)
+        throw new Error("Domains konnten nicht geladen werden.");
+      return response.json();
+    },
+  });
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey });
+  const createDomain = useMutation({
+    mutationFn: async (payload: { hostname: string; environment: string }) => {
+      const response = await fetch(
+        apiUrl(`/organizations/${orgSlug}/projects/${projectId}/domains`),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          (await response.json().catch(() => null))?.error ??
+            "Domain konnte nicht hinzugefügt werden.",
+        );
+    },
+    onSuccess: () => {
+      setIsCreating(false);
+      setHostname("");
+      setEnvironment("production");
+      setFormError(null);
+      invalidate();
+    },
+    onError: (error: Error) => setFormError(error.message),
+  });
+  const updateDomain = useMutation({
+    mutationFn: async ({ id, ...payload }: ProjectDomain) => {
+      const response = await fetch(
+        apiUrl(`/organizations/${orgSlug}/projects/${projectId}/domains/${id}`),
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            hostname: payload.hostname,
+            environment: payload.environment,
+          }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          (await response.json().catch(() => null))?.error ??
+            "Domain konnte nicht aktualisiert werden.",
+        );
+    },
+    onSuccess: () => {
+      setEditing(null);
+      setFormError(null);
+      setIsCreating(false);
+      invalidate();
+    },
+    onError: (error: Error) => setFormError(error.message),
+  });
+  const deleteDomain = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(
+        apiUrl(`/organizations/${orgSlug}/projects/${projectId}/domains/${id}`),
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!response.ok) throw new Error("Domain konnte nicht entfernt werden.");
+    },
+    onSuccess: invalidate,
+  });
+  const verifyDomain = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(
+        apiUrl(
+          `/organizations/${orgSlug}/projects/${projectId}/domains/${id}/verify`,
+        ),
+        { method: "POST", credentials: "include" },
+      );
+      if (!response.ok)
+        throw new Error(
+          (await response.json().catch(() => null))?.error ??
+            "DNS-Prüfung konnte nicht gestartet werden.",
+        );
+    },
+    onSuccess: invalidate,
+  });
+
+  function submit() {
+    const normalizedHostname = hostname.trim().toLowerCase();
+    if (!isValidHostname(normalizedHostname)) {
+      setFormError(
+        "Bitte gib einen gültigen Hostnamen ohne Protokoll oder Pfad ein.",
+      );
+      return;
     }
-    queryClient.setQueryData<Domain[]>(
-      ['orgs', orgSlug, 'projects', projectId, 'domains'],
-      (old) => [...(old ?? []), newEntry]
-    )
-    setNewDomain('')
-    setShowAdd(false)
+    if (editing)
+      updateDomain.mutate({
+        ...editing,
+        hostname: normalizedHostname,
+        environment,
+      });
+    else createDomain.mutate({ hostname: normalizedHostname, environment });
   }
 
-  function handleDelete(id: string) {
-    queryClient.setQueryData<Domain[]>(
-      ['orgs', orgSlug, 'projects', projectId, 'domains'],
-      (old) => (old ?? []).filter((d) => d.id !== id)
-    )
+  function openCreate() {
+    setEditing(null);
+    setHostname("");
+    setEnvironment("production");
+    setFormError(null);
+    setIsCreating(true);
   }
+
+  function openEdit(domain: ProjectDomain) {
+    setEditing(domain);
+    setHostname(domain.hostname);
+    setEnvironment(domain.environment);
+    setFormError(null);
+    setIsCreating(true);
+  }
+
+  const saving = createDomain.isPending || updateDomain.isPending;
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <PageHeader
           title="Domains"
-          description="Custom-Domains und SSL-Zertifikate"
+          description="Eigene Domains, Zielumgebungen und TLS-Status verwalten."
         />
-        <Button size="sm" className="gap-1.5" onClick={() => setShowAdd(true)}>
+        <Button size="sm" className="gap-1.5" onClick={openCreate}>
           <Plus className="h-3.5 w-3.5" />
           Domain hinzufügen
         </Button>
       </div>
 
-      {/* Add Domain Form */}
-      {showAdd && (
-        <div className="flex items-center gap-3 rounded-xl border border-[#0984e3]/30 bg-[#0984e3]/5 p-4">
-          <Globe className="h-4 w-4 shrink-0 text-zinc-400" />
-          <input
-            autoFocus
-            type="text"
-            placeholder="meine-domain.com"
-            value={newDomain}
-            onChange={(e) => setNewDomain(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
-          />
-          <select
-            value={newEnv}
-            onChange={(e) => setNewEnv(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-[#1e272e] px-2.5 py-1 text-xs text-zinc-300 focus:outline-none"
-          >
-            <option value="production">Production</option>
-            <option value="staging">Staging</option>
-            <option value="dev">Dev</option>
-          </select>
-          <Button size="xs" onClick={handleAdd}>Hinzufügen</Button>
-          <Button size="xs" variant="ghost" onClick={() => setShowAdd(false)}>Abbrechen</Button>
-        </div>
+      {isCreating && (
+        <section className="rounded-xl border border-[#0984e3]/30 bg-[#0984e3]/5 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-100">
+              {editing ? "Domain bearbeiten" : "Neue Domain"}
+            </h2>
+            <button
+              type="button"
+              aria-label="Formular schließen"
+              onClick={() => setIsCreating(false)}
+              className="text-zinc-500 hover:text-zinc-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
+            <input
+              value={hostname}
+              onChange={(event) => setHostname(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && submit()}
+              inputMode="url"
+              autoComplete="url"
+              placeholder="app.example.com"
+              className="h-9 rounded-lg border border-white/[0.1] bg-[#1e272e] px-3 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-[#0984e3]"
+            />
+            <select
+              value={environment}
+              onChange={(event) => setEnvironment(event.target.value)}
+              className="h-9 rounded-lg border border-white/[0.1] bg-[#1e272e] px-3 text-sm text-zinc-200 outline-none focus:border-[#0984e3]"
+            >
+              <option value="production">Production</option>
+              <option value="staging">Staging</option>
+              <option value="development">Development</option>
+            </select>
+            <Button size="sm" onClick={submit} disabled={saving}>
+              {saving && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
+              Speichern
+            </Button>
+          </div>
+          {formError && (
+            <p className="mt-3 text-xs text-red-400">{formError}</p>
+          )}
+        </section>
       )}
 
-      {/* Domain List */}
-      <div className="rounded-xl border border-white/[0.06] bg-[#1e272e]">
-        {isLoading ? (
-          <div className="divide-y divide-white/[0.04]">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-16 animate-pulse px-5 py-4" />
+      <section className="overflow-hidden rounded-xl border border-white/[0.06] bg-[#1e272e]">
+        {domains.isLoading ? (
+          <div className="flex items-center gap-2 p-6 text-sm text-zinc-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Domains werden geladen …
+          </div>
+        ) : domains.isError ? (
+          <div className="p-6 text-sm text-red-400">
+            {domains.error.message}
+          </div>
+        ) : domains.data?.length ? (
+          <div className="divide-y divide-white/[0.06]">
+            {domains.data.map((domain) => (
+              <div
+                key={domain.id}
+                className="group flex items-center gap-4 px-5 py-4"
+              >
+                <Globe className="h-4 w-4 shrink-0 text-[#00cec9]" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-mono text-sm font-medium text-zinc-100">
+                    {domain.hostname}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                    <span>{domain.environment}</span>
+                    <span
+                      className={
+                        domain.status === "active"
+                          ? "text-emerald-400"
+                          : domain.status === "failed"
+                            ? "text-red-400"
+                            : "text-amber-400"
+                      }
+                    >
+                      {domain.status === "active"
+                        ? "Aktiv"
+                        : domain.status === "failed"
+                          ? "Fehler"
+                          : "DNS-Prüfung ausstehend"}
+                    </span>
+                    {domain.sslExpiresAt && (
+                      <span>
+                        TLS bis{" "}
+                        {new Date(domain.sslExpiresAt).toLocaleDateString(
+                          "de-DE",
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {domain.status === "active" && (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                )}
+                {domain.status !== "active" && (
+                  <button
+                    type="button"
+                    onClick={() => verifyDomain.mutate(domain.id)}
+                    disabled={verifyDomain.isPending}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-amber-400 hover:bg-amber-400/10 disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${verifyDomain.isPending ? "animate-spin" : ""}`}
+                    />
+                    DNS prüfen
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label={`${domain.hostname} bearbeiten`}
+                  onClick={() => openEdit(domain)}
+                  className="rounded-lg p-2 text-zinc-500 opacity-0 transition hover:bg-white/[0.06] hover:text-zinc-100 group-hover:opacity-100"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${domain.hostname} entfernen`}
+                  onClick={() => deleteDomain.mutate(domain.id)}
+                  disabled={deleteDomain.isPending}
+                  className="rounded-lg p-2 text-zinc-500 opacity-0 transition hover:bg-red-400/10 hover:text-red-400 group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             ))}
           </div>
         ) : (
-          <div className="divide-y divide-white/[0.04]">
-            {domains.map((dom) => {
-              const cfg = STATUS_MAP[dom.status]
-              const Icon = cfg.icon
-              return (
-                <div key={dom.id} className="group flex items-center gap-4 px-5 py-4">
-                  {/* Status icon */}
-                  <Icon className={`h-4 w-4 shrink-0 ${cfg.color}`} />
-
-                  {/* Domain info */}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-zinc-100">{dom.domain}</span>
-                      {!dom.isCustom && (
-                        <span className="rounded-full border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-zinc-500">
-                          Devion
-                        </span>
-                      )}
-                      <span className="rounded border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-500">
-                        {dom.environment}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-600">
-                      <span className={cfg.color}>{cfg.label}</span>
-                      {dom.sslExpiry && (
-                        <span className="flex items-center gap-1">
-                          <Lock className="h-3 w-3 text-emerald-400" />
-                          SSL bis {dom.sslExpiry}
-                        </span>
-                      )}
-                      {!dom.sslExpiry && dom.status !== 'pending' && (
-                        <span className="flex items-center gap-1 text-amber-400">
-                          <LockOpen className="h-3 w-3" />
-                          Kein SSL
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  {dom.isCustom && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(dom.id)}
-                      className="rounded p-1.5 text-zinc-600 opacity-0 transition-opacity hover:bg-red-400/10 hover:text-red-400 group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-
-                  {dom.status === 'pending' && (
-                    <button
-                      type="button"
-                      className="flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[11px] text-amber-400 hover:bg-amber-400/20"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      DNS prüfen
-                    </button>
-                  )}
-                </div>
-              )
-            })}
+          <div className="p-10 text-center">
+            <Globe className="mx-auto mb-3 h-7 w-7 text-zinc-600" />
+            <p className="text-sm font-medium text-zinc-300">
+              Noch keine Domain konfiguriert
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Füge eine Custom-Domain hinzu und richte anschließend den
+              DNS-Eintrag ein.
+            </p>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* DNS-Hinweis */}
-      <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4">
-        <p className="text-sm font-medium text-amber-300">DNS-Konfiguration</p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Richte bei deinem DNS-Provider einen <span className="font-mono text-zinc-300">CNAME</span>-Eintrag auf{' '}
-          <span className="font-mono text-zinc-300">proxy.devion.app</span> oder einen{' '}
-          <span className="font-mono text-zinc-300">A</span>-Eintrag auf{' '}
-          <span className="font-mono text-zinc-300">185.199.108.1</span> ein.
+      <section className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 text-xs text-zinc-400">
+        <p className="font-medium text-amber-300">DNS-Konfiguration</p>
+        <p className="mt-1">
+          Lege einen CNAME-Eintrag für den Hostnamen auf{" "}
+          <span className="font-mono text-zinc-200">proxy.devion.app</span> an.
+          Nach einer Hostnamen-Änderung wird die Domain erneut geprüft.
         </p>
-      </div>
+      </section>
     </div>
-  )
+  );
 }

@@ -1,4 +1,4 @@
-import { db, checkDbHealth, closeDbPool } from "@repo/infrastructure";
+import { db, checkDbHealth, closeDbPool } from "@repo/db";
 
 // Health-Check ausführen
 const health = await checkDbHealth();

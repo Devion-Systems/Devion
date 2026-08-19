@@ -1,5 +1,7 @@
+import { checkDbHealth } from "@repo/db";
+import { dockerRegistry } from "@repo/registry";
+import { blobStorage } from "@repo/s3";
 import { Hono } from "hono";
-import { checkInfrastructureHealth } from "@repo/infrastructure";
 import type { AppEnv } from "../types/env.js";
 
 const health = new Hono<AppEnv>();
@@ -19,16 +21,29 @@ health.get("/detailed", async (c) => {
   const logger = c.get("logger");
 
   try {
-    const result = await checkInfrastructureHealth();
-    const status = result.status === "ok" ? 200 : result.status === "degraded" ? 207 : 503;
+    const [database, registry] = await Promise.all([checkDbHealth(), dockerRegistry.ping()]);
+
+    let storage: "ok" | "error" = "ok";
+    try {
+      await blobStorage.ensureBucketExists("devion-health-check");
+    } catch {
+      storage = "error";
+    }
+
+    const status = database.status === "ok" && registry && storage === "ok" ? "ok" : "degraded";
+    const httpStatus = status === "ok" ? 200 : 207;
 
     return c.json(
       {
-        status: result.status,
+        status,
         timestamp: new Date().toISOString(),
-        services: result,
+        services: {
+          database,
+          storage,
+          registry: registry ? "ok" : "error",
+        },
       },
-      status,
+      httpStatus,
     );
   } catch (err) {
     logger.error({ err }, "Health check failed");

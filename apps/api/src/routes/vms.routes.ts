@@ -1,9 +1,12 @@
-import { Hono } from "hono";
-import { vmManager } from "@repo/firecracker";
 import { AppError, ErrorCode } from "@repo/core";
+import { vmManager } from "../features/firecracker/index.js";
+import { Hono } from "hono";
+import { requireAuthenticatedUser } from "../middleware/auth.js";
 import type { AppEnv } from "../types/env.js";
 
 const vms = new Hono<AppEnv>();
+
+vms.use("/*", requireAuthenticatedUser);
 
 /**
  * GET / — List all managed VMs.

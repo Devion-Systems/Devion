@@ -3,14 +3,14 @@
   "compilerOptions": {
     "types": ["bun"],
     "esModuleInterop": true,
-    "noEmit": true, 
+    "noEmit": true,
     "composite": true,
     "outDir": "dist",
     "paths": {
-       "@/*": ["./src/*"],
-       "@devion/env/server":["../env"]
+      "@/*": ["./src/*"],
+      "@devion/env/server": ["../env"]
     }
   },
-  "include": ["src/config/**/*.tssrc/rbac/**/*.ts*.ts", "index.ts"],
+  "include": ["src/**/*.ts", "index.ts"],
   "exclude": ["node_modules", "**/*.test.ts", "**/*.spec.ts"]
 }

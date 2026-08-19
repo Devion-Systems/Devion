@@ -15,9 +15,9 @@ type EnvVar = {
 }
 
 const PLACEHOLDER_VARS: EnvVar[] = [
-  { key: 'DATABASE_URL',       value: 'postgresql://user:pass@db:5432/app', isSecret: true  },
-  { key: 'REDIS_URL',          value: 'redis://cache:6379',                 isSecret: true  },
-  { key: 'JWT_SECRET',         value: 'supersecretvalue',                   isSecret: true  },
+  { key: 'DATABASE_URL',       value: '••••••••••••',                       isSecret: true  },
+  { key: 'REDIS_URL',          value: '••••••••••••',                       isSecret: true  },
+  { key: 'JWT_SECRET',         value: '••••••••••••',                       isSecret: true  },
   { key: 'NODE_ENV',           value: 'production',                         isSecret: false },
   { key: 'PORT',               value: '3000',                               isSecret: false },
   { key: 'LOG_LEVEL',          value: 'info',                               isSecret: false },

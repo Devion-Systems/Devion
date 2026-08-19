@@ -1,10 +1,10 @@
 import { db, system_feature } from "@repo/db";
-import { defaultFeatures } from "./features.config.js";
 import { notInArray } from "drizzle-orm";
+import { defaultFeatures } from "./features.config.js";
 
 export async function syncFeaturesToDatabase() {
   console.log("🔄 Synchronisiere Standard-Features mit der Datenbank...");
-  const validNames = defaultFeatures.map(f => f.name);
+  const validNames = defaultFeatures.map((f) => f.name);
 
   if (defaultFeatures.length === 0) return;
 
