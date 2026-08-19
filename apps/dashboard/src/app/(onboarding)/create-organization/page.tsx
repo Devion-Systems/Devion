@@ -1,15 +1,22 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { Building2 } from "lucide-react";
+import { DesignEmptyState } from "@/components/layout/design-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 
 export default function CreateOrganizationPage() {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Organisation erstellen"
-        description="CreateOrgForm, danach Redirect zu /{orgSlug}"
+        description="Lege den gemeinsamen Bereich für Projekte, Teams und Infrastruktur an."
       />
-      {/* TODO: CreateOrgForm, danach Redirect zu /{orgSlug} */}
+      <DesignEmptyState
+        icon={Building2}
+        title="Deine neue Organisation"
+        description="Der Einrichtungsassistent führt dich durch Name, Slug und erste Zugriffsoptionen."
+        detail="Nach der Einrichtung landest du direkt in deinem Control Center."
+      />
     </div>
-  )
+  );
 }

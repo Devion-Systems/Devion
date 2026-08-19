@@ -1,15 +1,21 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { BellRing } from "lucide-react";
+import { DesignEmptyState } from "@/components/layout/design-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 
 export default function AccountNotificationsPage() {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 py-1">
       <PageHeader
         title="Benachrichtigungen"
-        description="E-Mail/Push-Präferenzen"
+        description="Lege fest, über welche wichtigen Ereignisse du informiert werden möchtest."
       />
-      {/* TODO: E-Mail/Push-Präferenzen */}
+      <DesignEmptyState
+        icon={BellRing}
+        title="Deine Benachrichtigungen"
+        description="E-Mail- und Push-Präferenzen werden hier in klaren, thematischen Gruppen verwaltet."
+      />
     </div>
-  )
+  );
 }

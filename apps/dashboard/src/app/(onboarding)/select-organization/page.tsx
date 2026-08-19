@@ -1,15 +1,21 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { Building2 } from "lucide-react";
+import { DesignEmptyState } from "@/components/layout/design-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 
 export default function SelectOrganizationPage() {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <PageHeader
         title="Organisation wählen"
-        description="Liste via useUserOrganizations, Klick navigiert zu /{orgSlug}"
+        description="Wähle den Workspace, in dem du heute arbeiten möchtest."
       />
-      {/* TODO: Liste via useUserOrganizations, Klick navigiert zu /{orgSlug} */}
+      <DesignEmptyState
+        icon={Building2}
+        title="Deine Workspaces"
+        description="Deine Organisationen werden hier als schnelle, visuell klare Auswahl angezeigt."
+      />
     </div>
-  )
+  );
 }

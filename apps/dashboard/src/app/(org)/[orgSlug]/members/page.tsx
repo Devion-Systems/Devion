@@ -1,15 +1,21 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { UsersRound } from "lucide-react";
+import { DesignEmptyState } from "@/components/layout/design-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 
-export default function MembersPage({ params }: { params: { orgSlug: string } }) {
+export default function MembersPage() {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-5 sm:p-7">
       <PageHeader
         title="Mitglieder"
-        description="MemberTable via useMembers(orgId)"
+        description="Mitglieder, Rollen und Zugriffsrechte in deiner Organisation."
       />
-      {/* TODO: MemberTable via useMembers(orgId) */}
+      <DesignEmptyState
+        icon={UsersRound}
+        title="Team-Mitglieder verwalten"
+        description="Die Mitgliederliste zeigt Rolle, Status und die wichtigsten Berechtigungen auf einen Blick."
+      />
     </div>
-  )
+  );
 }

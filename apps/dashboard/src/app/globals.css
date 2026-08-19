@@ -66,10 +66,10 @@
   --popover-foreground: #f5f6fa;
   --primary: #0984e3;
   --primary-foreground: #ffffff;
-  --secondary: #26343e;
+  --secondary: color-mix(in srgb, #1e272e 92%, #f5f6fa);
   --secondary-foreground: #f5f6fa;
-  --muted: #26343e;
-  --muted-foreground: #9aa9b4;
+  --muted: color-mix(in srgb, #1e272e 88%, #f5f6fa);
+  --muted-foreground: color-mix(in srgb, #f5f6fa 60%, #1e272e);
   --accent: #00cec9;
   --accent-foreground: #10171c;
   --destructive: oklch(0.577 0.245 27.325);
@@ -82,7 +82,7 @@
   --chart-4: #81ecec;
   --chart-5: #a29bfe;
   --radius: 0.75rem;
-  --sidebar: #11191f;
+  --sidebar: #1e272e;
   --sidebar-foreground: #f5f6fa;
   --sidebar-primary: #0984e3;
   --sidebar-primary-foreground: #ffffff;
@@ -90,42 +90,42 @@
   --sidebar-accent-foreground: #f5f6fa;
   --sidebar-border: rgb(245 246 250 / 8%);
   --sidebar-ring: #00cec9;
-  --background: #11191f;
+  --background: #1e272e;
   --foreground: #f5f6fa;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: #1e272e;
+  --foreground: #f5f6fa;
+  --card: #1e272e;
+  --card-foreground: #f5f6fa;
+  --popover: #1e272e;
+  --popover-foreground: #f5f6fa;
+  --primary: #0984e3;
+  --primary-foreground: #f5f6fa;
+  --secondary: color-mix(in srgb, #1e272e 92%, #f5f6fa);
+  --secondary-foreground: #f5f6fa;
+  --muted: color-mix(in srgb, #1e272e 88%, #f5f6fa);
+  --muted-foreground: color-mix(in srgb, #f5f6fa 60%, #1e272e);
+  --accent: #00cec9;
+  --accent-foreground: #1e272e;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --border: rgb(245 246 250 / 10%);
+  --input: rgb(245 246 250 / 12%);
+  --ring: #0984e3;
+  --chart-1: #0984e3;
+  --chart-2: #00cec9;
+  --chart-3: #74b9ff;
+  --chart-4: #81ecec;
+  --chart-5: #a29bfe;
+  --sidebar: #1e272e;
+  --sidebar-foreground: #f5f6fa;
+  --sidebar-primary: #0984e3;
+  --sidebar-primary-foreground: #f5f6fa;
+  --sidebar-accent: color-mix(in srgb, #1e272e 90%, #f5f6fa);
+  --sidebar-accent-foreground: #f5f6fa;
+  --sidebar-border: rgb(245 246 250 / 8%);
+  --sidebar-ring: #00cec9;
 }
 
 @layer base {
@@ -138,6 +138,17 @@
     font-family: var(--font-devion-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     text-rendering: optimizeLegibility;
+    background-image:
+      radial-gradient(
+        circle at 72% -12%,
+        rgb(9 132 227 / 14%),
+        transparent 30rem
+      ),
+      radial-gradient(
+        circle at 100% 100%,
+        rgb(0 206 201 / 5%),
+        transparent 34rem
+      );
   }
   html {
     @apply font-sans;
@@ -157,6 +168,39 @@
       linear-gradient(90deg, rgb(245 246 250 / 2.5%) 1px, transparent 1px);
     background-position: center top;
     background-size: 64px 64px;
+  }
+
+  .app-surface {
+    background-image:
+      linear-gradient(rgb(245 246 250 / 1.8%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(245 246 250 / 1.8%) 1px, transparent 1px);
+    background-position: center top;
+    background-size: 72px 72px;
+  }
+
+  /* Gives unfinished data views a deliberate design state until their APIs are connected. */
+  @supports selector(:has(*)) {
+    .space-y-6:has(> [data-slot="page-header"]:only-child)::after {
+      display: flex;
+      min-height: 16rem;
+      align-items: center;
+      justify-content: center;
+      border: 1px dashed rgb(245 246 250 / 12%);
+      border-radius: 1rem;
+      background:
+        radial-gradient(
+          circle at 50% 0,
+          rgb(9 132 227 / 10%),
+          transparent 17rem
+        ),
+        rgb(23 33 40 / 72%);
+      color: #778692;
+      content: "Bereit für die Einrichtung\A\AHier erscheinen Daten, Aktivitäten und Konfigurationsoptionen, sobald dieser Bereich angebunden ist.";
+      font-size: 0.8125rem;
+      line-height: 1.55;
+      text-align: center;
+      white-space: pre-line;
+    }
   }
 
   .devion-status-dot {
