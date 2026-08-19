@@ -1,0 +1,75 @@
+name: devion-builder
+
+x-builder-env: &builder-env
+  DATABASE_URL: postgres://devion_builder:${POSTGRES_PASSWORD:-devion-builder-local}@postgres:5432/devion_builder
+  BUILDER_API_TOKEN: ${BUILDER_API_TOKEN:-local-builder-token-change-this}
+  BUILDKIT_ADDRESS: tcp://buildkit:1234
+  BUILDER_WORKDIR: /workspaces
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devion_builder
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devion-builder-local}
+      POSTGRES_DB: devion_builder
+    volumes:
+      - builder-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devion_builder"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  buildkit:
+    image: moby/buildkit:v0.25.2-rootless
+    restart: unless-stopped
+    command: ["--addr", "tcp://0.0.0.0:1234"]
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    volumes:
+      - builder-buildkit:/home/user/.local/share/buildkit
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["bun", "src/api.ts"]
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *builder-env
+      PORT: 3010
+    ports:
+      - "127.0.0.1:${BUILDER_PORT:-3010}:3010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "process.exit((await fetch('http://localhost:3010/health/ready')).ok ? 0 : 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["bun", "src/worker.ts"]
+    restart: unless-stopped
+    init: true
+    environment: *builder-env
+    volumes:
+      - builder-workspaces:/workspaces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      buildkit:
+        condition: service_started
+
+volumes:
+  builder-postgres:
+  builder-buildkit:
+  builder-workspaces:

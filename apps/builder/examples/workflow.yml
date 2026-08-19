@@ -1,0 +1,38 @@
+version: 1
+name: Build and publish API
+env:
+  CI: "true"
+steps:
+  - id: test
+    name: Run tests
+    run: bun install --frozen-lockfile && bun test
+    timeoutMinutes: 10
+
+  - id: image
+    name: Build OCI image
+    needs: [test]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms: [linux/amd64, linux/arm64]
+      tags:
+        - registry.devion.local/example/api:${{ git.sha }}
+      push: true
+      args:
+        APP_VERSION: ${{ git.sha }}
+      cacheFrom:
+        - type=registry,ref=registry.devion.local/example/api:cache
+      cacheTo: type=registry,ref=registry.devion.local/example/api:cache,mode=max
+
+  - id: deploy
+    name: Deploy immutable image to Firecracker
+    needs: [image]
+    deploy:
+      mode: automatic
+      image: registry.devion.local/example/api:${{ git.sha }}
+      registryUsernameSecret: REGISTRY_USERNAME
+      registryPasswordSecret: REGISTRY_PASSWORD
+      instanceName: example-api
+      resourceTemplate: standard
+      environment:
+        APP_ENV: production

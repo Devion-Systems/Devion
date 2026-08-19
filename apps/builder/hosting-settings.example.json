@@ -1,0 +1,13 @@
+{
+  "defaultResources": {
+    "vcpuCount": 1,
+    "memoryMiB": 512,
+    "rootfsSizeMiB": 2048
+  },
+  "defaultServicePort": 8080,
+  "templates": {
+    "small": { "vcpuCount": 1, "memoryMiB": 256, "rootfsSizeMiB": 1024 },
+    "standard": { "vcpuCount": 2, "memoryMiB": 1024, "rootfsSizeMiB": 4096 },
+    "large": { "vcpuCount": 4, "memoryMiB": 4096, "rootfsSizeMiB": 16384 }
+  }
+}

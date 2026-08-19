@@ -1,0 +1,29 @@
+{
+  "name": "devion-builder",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/api.ts",
+    "dev:api": "bun --hot src/api.ts",
+    "dev:worker": "bun --hot src/worker.ts",
+    "dev:agent": "bun --hot src/agent.ts",
+    "start": "bun src/api.ts",
+    "start:worker": "bun src/worker.ts",
+    "start:agent": "bun src/agent.ts",
+    "build": "bun build src/api.ts src/worker.ts src/agent.ts --outdir dist --target bun",
+    "check-types": "tsc --noEmit",
+    "test": "bun test",
+    "migrate": "bun src/migrate.ts"
+  },
+  "dependencies": {
+    "hono": "^4.12.32",
+    "postgres": "^3.4.9",
+    "yaml": "^2.8.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3"
+  }
+}

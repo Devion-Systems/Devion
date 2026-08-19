@@ -1,4 +1,17 @@
-# Turborepo starter
+# Devion
+
+Devion is a Bun/Turborepo platform. The new OCI image builder lives in
+[`apps/builder`](apps/builder) and runs as an isolated Bun/Hono application
+with a separate worker and Firecracker host agent.
+
+```bash
+bun install
+bun run builder:typecheck
+bun run builder:test
+bun run builder:up
+```
+
+## Original Turborepo notes
 
 This Turborepo starter is maintained by the Turborepo core team.
 
