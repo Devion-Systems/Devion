@@ -60,7 +60,9 @@ async function syncTraefikRoutes(
   );
 }
 
-function activeDomains<T extends TraefikDomain & { status: string }>(domains: T[]): TraefikDomain[] {
+function activeDomains<T extends TraefikDomain & { status: string }>(
+  domains: T[],
+): TraefikDomain[] {
   return domains
     .filter((domain) => domain.status === "active")
     .map(({ id, hostname }) => ({ id, hostname }));
@@ -218,8 +220,37 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains", async (c) => {
       return c.json({ error: "Hostname is already assigned to this project" }, 409);
     throw error;
   }
-  // Do not publish or request a certificate until ownership has been verified.
-  // The verify endpoint performs the first Traefik sync for this domain.
+
+  // Attempt verification immediately. If DNS has not propagated yet, the
+  // domain remains pending and the existing verify action can be retried.
+  if (process.env.TRAEFIK_PUBLIC_IP || process.env.TRAEFIK_CNAME_TARGET) {
+    const verified = await dnsManager.verifyDomain(payload.data.hostname);
+    if (verified) {
+      const allDomains = await db
+        .select({
+          id: projectDomains.id,
+          hostname: projectDomains.hostname,
+          status: projectDomains.status,
+        })
+        .from(projectDomains)
+        .where(eq(projectDomains.projectId, access.project.id));
+      try {
+        await syncTraefikRoutes(access.project, [
+          ...activeDomains(allDomains.filter((domain) => domain.id !== id)),
+          { id, hostname: payload.data.hostname },
+        ]);
+        await db.update(projectDomains).set({ status: "active" }).where(eq(projectDomains.id, id));
+        return c.json({ id, ...payload.data, status: "active" }, 201);
+      } catch (error) {
+        c.get("logger").error(
+          { error, projectId: access.project.id, hostname: payload.data.hostname },
+          "Unable to publish automatically verified Traefik domain route",
+        );
+      }
+    }
+  }
+
+  // Do not request a certificate until DNS ownership has been verified.
   return c.json({ id, ...payload.data, status: "pending" }, 201);
 });
 
@@ -246,7 +277,11 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     ? { ...payload.data, status: "pending" as const, sslExpiresAt: null }
     : payload.data;
   const allDomains = await db
-    .select({ id: projectDomains.id, hostname: projectDomains.hostname, status: projectDomains.status })
+    .select({
+      id: projectDomains.id,
+      hostname: projectDomains.hostname,
+      status: projectDomains.status,
+    })
     .from(projectDomains)
     .where(eq(projectDomains.projectId, access.project.id));
   const nextDomains = allDomains.map((domain) =>
@@ -267,7 +302,11 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     // route now and wait for the explicit verification before publishing it.
     await syncTraefikRoutes(
       access.project,
-      activeDomains(payload.data.hostname ? nextDomains.filter((domain) => domain.id !== current.id) : nextDomains),
+      activeDomains(
+        payload.data.hostname
+          ? nextDomains.filter((domain) => domain.id !== current.id)
+          : nextDomains,
+      ),
     );
   } catch (error) {
     c.get("logger").error(
@@ -304,7 +343,11 @@ projectRoutes.delete("/:orgSlug/projects/:projectId/domains/:domainId", async (c
   });
   if (!current) return c.json({ error: "Domain not found" }, 404);
   const remainingDomains = await db
-    .select({ id: projectDomains.id, hostname: projectDomains.hostname, status: projectDomains.status })
+    .select({
+      id: projectDomains.id,
+      hostname: projectDomains.hostname,
+      status: projectDomains.status,
+    })
     .from(projectDomains)
     .where(eq(projectDomains.projectId, access.project.id));
   try {
@@ -353,7 +396,11 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains/:domainId/verify", asy
   const verified = await dnsManager.verifyDomain(domain.hostname);
   if (verified) {
     const allDomains = await db
-      .select({ id: projectDomains.id, hostname: projectDomains.hostname, status: projectDomains.status })
+      .select({
+        id: projectDomains.id,
+        hostname: projectDomains.hostname,
+        status: projectDomains.status,
+      })
       .from(projectDomains)
       .where(eq(projectDomains.projectId, access.project.id));
     try {
