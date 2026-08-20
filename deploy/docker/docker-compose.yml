@@ -107,8 +107,6 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.dashboard
-      args:
-        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://127.0.0.1}
     restart: unless-stopped
     depends_on:
       api:

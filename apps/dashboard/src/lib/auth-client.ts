@@ -4,8 +4,10 @@ import {
   twoFactorClient,
 } from "better-auth/client/plugins";
 
+const baseURL = process.env.NEXT_PUBLIC_API_URL;
+
 export const authClient = createAuthClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  ...(baseURL ? { baseURL } : {}),
   plugins: [
     organizationClient({ teams: { enabled: true } }),
     twoFactorClient(),
