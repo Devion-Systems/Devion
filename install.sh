@@ -87,6 +87,8 @@ else
   # certificate. Move only control-plane URLs to the host-IP default; project
   # domains remain database-managed and are never touched here.
   info "Migriere Control-Plane auf Host-IP-Zugriff"
+  backup_file="${ENV_FILE}.before-host-ip-$(date +%Y%m%d%H%M%S)"
+  cp -p "$ENV_FILE" "$backup_file"
   set_env_value "HOST_IP" "$HOST_IP"
   set_env_value "BETTER_AUTH_URL" "http://$HOST_IP"
   set_env_value "BETTER_AUTH_TRUSTED_ORIGINS" "http://$HOST_IP"
@@ -95,7 +97,11 @@ else
   set_env_value "BETTER_AUTH_COOKIE_DOMAIN" ""
   set_env_value "TRAEFIK_INTERNAL_DOMAIN" ""
   set_env_value "TRAEFIK_PUBLIC_IP" "$HOST_IP"
-  set_env_value "TRAEFIK_ACME_EMAIL" "$ACME_EMAIL"
+  # Never erase an ACME contact that was already configured on the host.
+  if [[ -n "$ACME_EMAIL" ]]; then
+    set_env_value "TRAEFIK_ACME_EMAIL" "$ACME_EMAIL"
+  fi
+  info "Vorherige Konfiguration gesichert: $backup_file"
 fi
 
 info "Bereite Traefik-Verzeichnisse vor"

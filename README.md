@@ -50,6 +50,12 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml
 To choose a specific bind IP or ports, set `DEVION_HOST_IP`,
 `DEVION_HTTP_PORT`, or `DEVION_HTTPS_PORT` before running the installer.
 
+Running the same command again is an update: the installer retains data and
+secrets, creates a timestamped backup of `deploy/docker/.env`, migrates legacy
+local hostnames to the host-IP URL, refreshes Traefik's routes, and rebuilds
+the dashboard with the correct API origin. No manual Traefik or CORS edits are
+required.
+
 ## Local development
 
 ```bash
