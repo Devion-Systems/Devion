@@ -96,12 +96,15 @@ docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-comp
 info "Warte auf API-Healthcheck"
 for _ in $(seq 1 60); do
   if curl --noproxy "*" --fail --silent --show-error --insecure --connect-timeout 2 \
-    -H "Host: $API_HOST" "https://$HOST_IP:$HTTPS_PORT/health" >/dev/null; then
+    --resolve "$API_HOST:$HTTPS_PORT:$HOST_IP" \
+    "https://$API_HOST:$HTTPS_PORT/health" >/dev/null; then
     break
   fi
   sleep 2
 done
-curl --noproxy "*" --fail --silent --show-error --insecure -H "Host: $API_HOST" "https://$HOST_IP:$HTTPS_PORT/health" >/dev/null \
+curl --noproxy "*" --fail --silent --show-error --insecure \
+  --resolve "$API_HOST:$HTTPS_PORT:$HOST_IP" \
+  "https://$API_HOST:$HTTPS_PORT/health" >/dev/null \
   || fail "API wurde nicht gesund. Logs: docker compose -f $INSTALL_DIR/deploy/docker/docker-compose.yml logs api"
 
 info "Installation erfolgreich"
