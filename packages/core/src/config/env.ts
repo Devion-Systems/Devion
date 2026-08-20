@@ -16,6 +16,7 @@ const coreEnvSchema = z.object({
   BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL muss eine gültige URL sein"),
   DASHBOARD_URL: z.string().url().optional(),
   BETTER_AUTH_TRUSTED_ORIGINS: z.string().optional(),
+  BETTER_AUTH_COOKIE_DOMAIN: z.string().min(1).optional(),
   // SMTP / Email-Service (optional – wird per Feature-Flag gesteuert)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),
@@ -58,7 +59,7 @@ export function parseEnv<T = Record<string, never>>(
 
   // Extensions are intentionally validated separately. Feature packages can
   // use either Zod v3 or v4 without breaking the core environment schema.
-  const extensionResult = (extendedSchema as EnvironmentSchema).safeParse(process.env);
+  const extensionResult = (extendedSchema as unknown as EnvironmentSchema).safeParse(process.env);
   if (!extensionResult.success) {
     const formatted = JSON.stringify(extensionResult.error.format(), null, 2);
     throw new AppError(

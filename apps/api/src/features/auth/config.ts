@@ -8,6 +8,7 @@ import { sendEmail } from "../email/index.js";
 
 const env = parseEnv();
 const emailVerificationEnabled = Boolean(env.SMTP_HOST && env.SMTP_FROM);
+const cookieDomain = env.BETTER_AUTH_COOKIE_DOMAIN?.trim();
 const trustedOrigins = [
   env.BETTER_AUTH_URL,
   ...(env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
@@ -79,6 +80,15 @@ export const auth = betterAuth({
   rateLimit: { enabled: true, window: 10, max: 100 },
   advanced: {
     ipAddress: { ipAddressHeaders: ["x-real-ip"], ipv6Subnet: 56 },
+    useSecureCookies: true,
+    ...(cookieDomain
+      ? {
+          crossSubDomainCookies: {
+            enabled: true,
+            domain: cookieDomain,
+          },
+        }
+      : {}),
   },
   session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
   plugins: [
