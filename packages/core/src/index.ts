@@ -1,4 +1,5 @@
 export { parseEnv, type CoreEnv } from "./config/env.js";
+export type { RequestId } from "./types/index.js";
 
 export { AppError, ErrorCode, type AppErrorOptions } from "./error/app-errors.js";
 export {

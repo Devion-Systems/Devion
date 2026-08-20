@@ -27,7 +27,7 @@ features.put("/:name", async (c) => {
   const body = await c.req.json<{ enabled: boolean }>();
 
   if (typeof body.enabled !== "boolean") {
-    throw new AppError(ErrorCode.BAD_REQUEST, "Field 'enabled' must be a boolean");
+    throw new AppError("Field 'enabled' must be a boolean", ErrorCode.VALIDATION_ERROR, 400);
   }
 
   await setFeatureStatus(name, body.enabled);

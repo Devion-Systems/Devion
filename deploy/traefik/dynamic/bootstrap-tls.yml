@@ -1,0 +1,6 @@
+# A locally generated certificate makes the first HTTPS boot usable. Uploading
+# a trusted certificate through the Admin Center adds it alongside this one.
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/bootstrap.crt
+      keyFile: /etc/traefik/certs/bootstrap.key

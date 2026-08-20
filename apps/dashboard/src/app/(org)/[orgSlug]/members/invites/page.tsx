@@ -32,7 +32,6 @@ export default function MembersInvitesPage() {
     if (!state) return;
     await authClient.organization.cancelInvitation({
       invitationId,
-      organizationId: state.organization.id,
     });
     await queryClient.invalidateQueries({
       queryKey: ["organization", orgSlug, "invitations"],

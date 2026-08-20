@@ -30,14 +30,21 @@ const coreEnvSchema = z.object({
 
 export type CoreEnv = z.infer<typeof coreEnvSchema>;
 
-export function parseEnv<T extends z.ZodRawShape>(
-  extendedSchema?: z.ZodObject<T>,
-): z.infer<z.ZodObject<T>> & CoreEnv {
-  const schema = extendedSchema ? coreEnvSchema.merge(extendedSchema) : coreEnvSchema;
-  const result = schema.safeParse(process.env);
+type EnvironmentSchema = {
+  safeParse(input: unknown):
+    | { success: true; data: Record<string, unknown> }
+    | { success: false; error: { format(): unknown } };
+};
 
-  if (!result.success) {
-    const formatted = JSON.stringify(result.error.format(), null, 2);
+type SchemaOutput<T> = T extends { _output: infer Output } ? Output : Record<string, never>;
+
+export function parseEnv<T = Record<string, never>>(
+  extendedSchema?: T,
+): CoreEnv & SchemaOutput<T> {
+  const coreResult = coreEnvSchema.safeParse(process.env);
+
+  if (!coreResult.success) {
+    const formatted = JSON.stringify(coreResult.error.format(), null, 2);
     throw new AppError(
       `Environment validation failed:\n${formatted}`,
       ErrorCode.VALIDATION_ERROR,
@@ -45,5 +52,21 @@ export function parseEnv<T extends z.ZodRawShape>(
     );
   }
 
-  return result.data as any;
+  if (!extendedSchema) {
+    return coreResult.data as CoreEnv & SchemaOutput<T>;
+  }
+
+  // Extensions are intentionally validated separately. Feature packages can
+  // use either Zod v3 or v4 without breaking the core environment schema.
+  const extensionResult = (extendedSchema as EnvironmentSchema).safeParse(process.env);
+  if (!extensionResult.success) {
+    const formatted = JSON.stringify(extensionResult.error.format(), null, 2);
+    throw new AppError(
+      `Environment validation failed:\n${formatted}`,
+      ErrorCode.VALIDATION_ERROR,
+      500,
+    );
+  }
+
+  return { ...coreResult.data, ...extensionResult.data } as CoreEnv & SchemaOutput<T>;
 }

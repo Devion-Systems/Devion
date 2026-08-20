@@ -1,6 +1,4 @@
 providers:
-  docker:
-    exposedByDefault: false
   file:
     # Verweist auf das Verzeichnis, in dem deine Steuerungsebene (Control Plane)
     # die dynamischen Konfigurationen für die Firecracker-VMs ablegt.

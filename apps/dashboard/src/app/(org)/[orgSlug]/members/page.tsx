@@ -67,7 +67,7 @@ export default function MembersPage() {
     )
       return;
     const { error } = await authClient.organization.removeMember({
-      memberId,
+      memberIdOrEmail: memberId,
       organizationId: state.organization.id,
     });
     setMessage(

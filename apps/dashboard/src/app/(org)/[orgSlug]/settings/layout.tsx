@@ -2,10 +2,8 @@
 
 export default function SettingsLayout({
   children,
-  params,
 }: {
   children: React.ReactNode
-  params: { orgSlug: string }
 }) {
   return (
     <div>

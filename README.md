@@ -1,172 +1,51 @@
 # Devion
 
-Devion is a Bun/Turborepo platform. The new OCI image builder lives in
-[`apps/builder`](apps/builder) and runs as an isolated Bun/Hono application
-with a separate worker and Firecracker host agent.
+Devion is a self-hosted platform for organisations, projects, access control,
+databases, domains, AI features, audit logs, and TLS-managed application routing.
+
+## Install with curl
+
+Requirements: a Linux host with Docker Engine, Docker Compose v2, Git, curl,
+and OpenSSL. Ports 80 and 443 must be available.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Devion-Systems/Devion/main/install.sh | sudo bash
+```
+
+The installer clones the project to `/opt/devion`, creates unique local
+secrets, starts PostgreSQL, RustFS, the OCI registry, the API, dashboard, and
+Traefik, applies database migrations, and verifies the API health endpoint.
+
+For a fork, override the source:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Devion-Systems/Devion/main/install.sh | \
+  sudo DEVION_REPOSITORY_URL=https://github.com/YOUR_ORG/Devion.git bash
+```
+
+Local defaults are `https://dashboard.devion.local` and
+`https://api.devion.local/health`. The installer adds those names to
+`/etc/hosts` when using the default local IP address. Traefik uses HTTPS; the
+local certificate is intentionally accepted by the install health check with
+`--insecure`. Upload a trusted certificate through the Admin Center for a
+public deployment.
+
+## Useful commands
+
+```bash
+cd /opt/devion
+docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml ps
+docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml logs -f api
+```
+
+To change hostnames or ports, set `DEVION_API_HOST`,
+`DEVION_DASHBOARD_HOST`, `DEVION_HTTP_PORT`, or `DEVION_HTTPS_PORT` before
+running the installer.
+
+## Local development
 
 ```bash
 bun install
-bun run builder:typecheck
-bun run builder:test
-bun run builder:up
+bun run --cwd apps/dashboard build
+bun run apps/api/src/index.ts
 ```
-
-## Original Turborepo notes
-
-This Turborepo starter is maintained by the Turborepo core team.
-
-## Using this example
-
-Run the following command:
-
-```sh
-npx create-turbo@latest
-```
-
-## What's inside?
-
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo build
-bun dlx turbo build
-bun exec turbo build
-```
-
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo build --filter=docs
-bun exec turbo build --filter=docs
-bun exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-bun exec turbo dev
-bun exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-bun exec turbo dev --filter=web
-bun exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-bun exec turbo login
-bun exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-bun exec turbo link
-bun exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)

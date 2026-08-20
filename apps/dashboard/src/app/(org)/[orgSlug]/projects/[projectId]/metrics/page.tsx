@@ -108,7 +108,10 @@ function MetricCard({
             <Tooltip
               contentStyle={{ backgroundColor: '#1e272e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 11 }}
               labelStyle={{ color: '#a1a1aa' }}
-              formatter={(v: number) => [`${v.toFixed(1)} ${unit}`, title]}
+              formatter={(value) => [
+                `${typeof value === 'number' ? value.toFixed(1) : '–'} ${unit}`,
+                title,
+              ]}
             />
             <Area
               type="monotone"

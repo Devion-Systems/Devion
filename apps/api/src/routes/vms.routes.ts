@@ -42,7 +42,7 @@ vms.get("/:id", async (c) => {
   const vm = await vmManager.getVm(id);
 
   if (!vm) {
-    throw new AppError(ErrorCode.NOT_FOUND, `VM '${id}' not found`);
+    throw new AppError(`VM '${id}' not found`, ErrorCode.NOT_FOUND, 404);
   }
 
   return c.json({ vm });
@@ -57,7 +57,7 @@ vms.delete("/:id", async (c) => {
 
   logger.info({ vmId: id }, "Deleting VM");
 
-  await vmManager.destroyVm(id);
+  await vmManager.deleteVm(id);
   return c.json({ message: `VM '${id}' deleted` });
 });
 

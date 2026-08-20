@@ -1,8 +1,6 @@
-import { childLogger, createLogger } from "@repo/core";
+import { childLogger } from "@repo/core";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../types/env.js";
-
-const baseLogger = createLogger("api");
 
 /**
  * Attaches a child logger (scoped to the current requestId) to context
@@ -11,7 +9,7 @@ const baseLogger = createLogger("api");
 export const requestLoggerMiddleware = () =>
   createMiddleware<AppEnv>(async (c, next) => {
     const requestId = c.get("requestId");
-    const logger = childLogger(baseLogger, { requestId });
+    const logger = childLogger("request", { requestId });
     c.set("logger", logger);
 
     const start = performance.now();

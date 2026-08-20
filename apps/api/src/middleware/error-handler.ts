@@ -1,21 +1,18 @@
 import { AppError, ErrorCode, getLogger } from "@repo/core";
 import type { ErrorHandler } from "hono";
-import type { StatusCode } from "hono/utils/http-status";
 import type { AppEnv } from "../types/env.js";
-
-const fallbackLogger = getLogger("api:error");
 
 /**
  * Maps internal ErrorCode to HTTP status codes.
  */
-const errorCodeToStatus: Record<string, StatusCode> = {
-  [ErrorCode.BAD_REQUEST]: 400,
+const errorCodeToStatus: Record<string, 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503> = {
+  [ErrorCode.VALIDATION_ERROR]: 400,
   [ErrorCode.UNAUTHORIZED]: 401,
   [ErrorCode.FORBIDDEN]: 403,
   [ErrorCode.NOT_FOUND]: 404,
   [ErrorCode.CONFLICT]: 409,
   [ErrorCode.RATE_LIMITED]: 429,
-  [ErrorCode.INTERNAL]: 500,
+  [ErrorCode.INTERNAL_ERROR]: 500,
   [ErrorCode.SERVICE_UNAVAILABLE]: 503,
 };
 
@@ -25,7 +22,7 @@ const errorCodeToStatus: Record<string, StatusCode> = {
  * and logs unexpected errors.
  */
 export const globalErrorHandler: ErrorHandler<AppEnv> = (err, c) => {
-  const logger = c.get("logger") ?? fallbackLogger;
+  const logger = c.get("logger") ?? getLogger();
 
   if (err instanceof AppError) {
     const status = errorCodeToStatus[err.code] ?? 500;
@@ -39,7 +36,7 @@ export const globalErrorHandler: ErrorHandler<AppEnv> = (err, c) => {
           ...(err.details ? { details: err.details } : {}),
         },
       },
-      status as StatusCode,
+      status,
     );
   }
 
@@ -49,7 +46,7 @@ export const globalErrorHandler: ErrorHandler<AppEnv> = (err, c) => {
   return c.json(
     {
       error: {
-        code: ErrorCode.INTERNAL,
+        code: ErrorCode.INTERNAL_ERROR,
         message: "An unexpected error occurred",
       },
     },

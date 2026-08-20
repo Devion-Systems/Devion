@@ -2,10 +2,8 @@
 
 export default function TeamsDetailLayout({
   children,
-  params,
 }: {
   children: React.ReactNode
-  params: { orgSlug: string, teamSlug: string }
 }) {
   return (
     <div>

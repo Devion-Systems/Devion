@@ -14,7 +14,7 @@ import type { AppEnv } from "./types/env.js";
 
 // --- Bootstrap ---
 const env = parseEnv();
-const logger = createLogger("api");
+const logger = createLogger(env, { name: "api" });
 
 const app = new Hono<AppEnv>();
 
@@ -32,7 +32,7 @@ app.notFound(notFoundHandler);
 app.route("/", routes);
 
 // --- Process guards (uncaught exceptions, unhandled rejections) ---
-registerProcessGuards();
+registerProcessGuards({ logger });
 
 // --- Startup ---
 const port = env.API_PORT ?? 3000;

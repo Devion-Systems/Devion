@@ -2,10 +2,8 @@
 
 export default function DatabasesDetailLayout({
   children,
-  params,
 }: {
   children: React.ReactNode
-  params: { orgSlug: string, databaseId: string }
 }) {
   return (
     <div>
