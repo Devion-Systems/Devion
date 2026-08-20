@@ -23,16 +23,21 @@ curl -fsSL https://raw.githubusercontent.com/Devion-Systems/Devion/main/install.
   sudo DEVION_REPOSITORY_URL=https://github.com/YOUR_ORG/Devion.git bash
 ```
 
-Local defaults are `http://dashboard.devion.test` and
-`http://api.devion.test/health`. `.test` is reserved for testing and avoids
-the Bonjour/mDNS behaviour macOS applies to `.local`. HTTP and HTTPS are both
-served, but HTTP is the local default so browsers do not reject the generated
-bootstrap certificate. The installer adds those names to `/etc/hosts` only
-when using the default local IP address.
+The installer detects the server's LAN IP and displays the dashboard URL as
+`http://SERVER-IP`. No DNS entry, hosts-file change, or certificate is needed
+for first access. The API health endpoint is available at
+`http://SERVER-IP/health`; API routes such as `/api/auth` and
+`/organizations/...` share that origin.
 
-For trusted HTTPS, use a public domain with a valid certificate, or install a
-locally trusted certificate (for example with `mkcert`) in
-`data/traefik/certs/` and set `DEVION_PUBLIC_PROTOCOL=https` before installing.
+Add a project domain in the dashboard only after its DNS A/AAAA or CNAME record
+points to this host. Devion verifies the record before publishing the HTTPS
+route; Traefik then requests its certificate from Let's Encrypt automatically.
+Set a contact email for the ACME account during installation, for example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Devion-Systems/Devion/main/install.sh | \
+  sudo DEVION_ACME_EMAIL=admin@example.com bash
+```
 
 ## Useful commands
 
@@ -42,9 +47,8 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml
 docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml logs -f api
 ```
 
-To change hostnames, ports, or the public protocol, set `DEVION_API_HOST`,
-`DEVION_DASHBOARD_HOST`, `DEVION_HTTP_PORT`, `DEVION_HTTPS_PORT`, or
-`DEVION_PUBLIC_PROTOCOL` before running the installer.
+To choose a specific bind IP or ports, set `DEVION_HOST_IP`,
+`DEVION_HTTP_PORT`, or `DEVION_HTTPS_PORT` before running the installer.
 
 ## Local development
 

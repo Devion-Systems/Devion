@@ -1,24 +1,27 @@
-# Core platform routes are file-provider based so they work with both Linux
-# Docker Engine and Docker Desktop. Project domain routes are added by the API
-# to the same dynamic configuration directory.
+# The control plane works directly from the host IP. Project-domain routes are
+# added by the API only after their DNS ownership has been verified.
 http:
   routers:
     devion-api-http:
-      rule: "HostRegexp(`^api\\..+$`)"
+      rule: "PathPrefix(`/api`) || PathPrefix(`/organizations`) || Path(`/health`)"
       entryPoints: [web]
+      priority: 100
       service: devion-api
     devion-api-https:
-      rule: "HostRegexp(`^api\\..+$`)"
+      rule: "PathPrefix(`/api`) || PathPrefix(`/organizations`) || Path(`/health`)"
       entryPoints: [websecure]
+      priority: 100
       service: devion-api
       tls: {}
     devion-dashboard-http:
-      rule: "HostRegexp(`^dashboard\\..+$`)"
+      rule: "PathPrefix(`/`)"
       entryPoints: [web]
+      priority: 1
       service: devion-dashboard
     devion-dashboard-https:
-      rule: "HostRegexp(`^dashboard\\..+$`)"
+      rule: "PathPrefix(`/`)"
       entryPoints: [websecure]
+      priority: 1
       service: devion-dashboard
       tls: {}
   services:

@@ -16,7 +16,13 @@ const coreEnvSchema = z.object({
   BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL muss eine gültige URL sein"),
   DASHBOARD_URL: z.string().url().optional(),
   BETTER_AUTH_TRUSTED_ORIGINS: z.string().optional(),
-  BETTER_AUTH_COOKIE_DOMAIN: z.string().min(1).optional(),
+  // Compose supplies an empty value when no shared cookie domain is needed
+  // (the host-IP first-install case). Normalize it instead of rejecting boot.
+  BETTER_AUTH_COOKIE_DOMAIN: z
+    .string()
+    .trim()
+    .transform((value) => value || undefined)
+    .optional(),
   // SMTP / Email-Service (optional – wird per Feature-Flag gesteuert)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),

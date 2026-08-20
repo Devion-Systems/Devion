@@ -17,7 +17,7 @@ export type TraefikSettings = {
   httpEntryPoint: string;
   httpsEntryPoint: string;
   certResolver: string;
-  internalDomain: string;
+  internalDomain?: string;
 };
 
 const safeIdentifier = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -63,9 +63,10 @@ export class TraefikManager {
       httpsEntryPoint:
         settings.httpsEntryPoint ?? process.env.TRAEFIK_HTTPS_ENTRYPOINT ?? "websecure",
       certResolver: settings.certResolver ?? process.env.TRAEFIK_CERT_RESOLVER ?? "le-kunden",
-      internalDomain: assertHostname(
-        settings.internalDomain ?? process.env.TRAEFIK_INTERNAL_DOMAIN ?? "devion.local",
-      ),
+      internalDomain: (() => {
+        const configured = settings.internalDomain ?? process.env.TRAEFIK_INTERNAL_DOMAIN;
+        return configured?.trim() ? assertHostname(configured) : undefined;
+      })(),
     };
   }
 
@@ -74,16 +75,23 @@ export class TraefikManager {
     const projectKey = safeIdentifier(target.projectId);
     const serviceName = `project-${projectKey}`;
     const targetUrl = assertUpstream(target.targetUrl);
-    const internalHostname = assertHostname(
-      `${safeIdentifier(target.projectSlug)}.${this.settings.internalDomain}`,
-    );
     const hostnames = [
-      { id: "internal", hostname: internalHostname, useCertificateResolver: false },
       ...domains.map((domain) => ({
         id: safeIdentifier(domain.id),
         hostname: assertHostname(domain.hostname),
         useCertificateResolver: true,
       })),
+      ...(this.settings.internalDomain
+        ? [
+            {
+              id: "internal",
+              hostname: assertHostname(
+                `${safeIdentifier(target.projectSlug)}.${this.settings.internalDomain}`,
+              ),
+              useCertificateResolver: false,
+            },
+          ]
+        : []),
     ];
     const routers: Record<string, unknown> = {};
 

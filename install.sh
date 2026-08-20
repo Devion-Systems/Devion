@@ -4,17 +4,29 @@ set -Eeuo pipefail
 REPOSITORY_URL="${DEVION_REPOSITORY_URL:-https://github.com/Devion-Systems/Devion.git}"
 VERSION="${DEVION_VERSION:-main}"
 INSTALL_DIR="${DEVION_INSTALL_DIR:-/opt/devion}"
-HOST_IP="${DEVION_HOST_IP:-127.0.0.1}"
-API_HOST="${DEVION_API_HOST:-api.devion.test}"
-DASHBOARD_HOST="${DEVION_DASHBOARD_HOST:-dashboard.devion.test}"
-AUTH_COOKIE_DOMAIN="${DEVION_AUTH_COOKIE_DOMAIN:-${API_HOST#*.}}"
+detect_host_ip() {
+  hostname -I 2>/dev/null | tr ' ' '\n' | awk \
+    -F. 'NF == 4 && $0 != "127.0.0.1" { print; exit }'
+}
+
+HOST_IP="${DEVION_HOST_IP:-$(detect_host_ip)}"
+HOST_IP="${HOST_IP:-127.0.0.1}"
 HTTP_PORT="${DEVION_HTTP_PORT:-80}"
 HTTPS_PORT="${DEVION_HTTPS_PORT:-443}"
-PUBLIC_PROTOCOL="${DEVION_PUBLIC_PROTOCOL:-http}"
+ACME_EMAIL="${DEVION_ACME_EMAIL:-}"
 
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
 secret() { openssl rand -hex 32; }
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
 
 [[ "${EUID}" -eq 0 ]] || fail "Bitte mit sudo ausführen: curl ... | sudo bash"
 command -v git >/dev/null || fail "git muss installiert sein."
@@ -22,8 +34,6 @@ command -v docker >/dev/null || fail "Docker Engine muss installiert sein."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 muss installiert sein."
 command -v openssl >/dev/null || fail "openssl muss installiert sein."
 command -v curl >/dev/null || fail "curl muss installiert sein."
-[[ "$PUBLIC_PROTOCOL" == "http" || "$PUBLIC_PROTOCOL" == "https" ]] \
-  || fail "DEVION_PUBLIC_PROTOCOL muss http oder https sein."
 
 if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR/.git" ]]; then
   fail "$INSTALL_DIR existiert, ist aber keine Devion-Git-Installation."
@@ -50,13 +60,11 @@ POSTGRES_USER=devion
 POSTGRES_PASSWORD=$db_password
 DATABASE_URL=postgres://devion:$db_password@postgres:5432/devion
 BETTER_AUTH_SECRET=$auth_secret
-BETTER_AUTH_URL=$PUBLIC_PROTOCOL://$API_HOST
-BETTER_AUTH_TRUSTED_ORIGINS=$PUBLIC_PROTOCOL://$DASHBOARD_HOST
-BETTER_AUTH_COOKIE_DOMAIN=$AUTH_COOKIE_DOMAIN
-DASHBOARD_URL=$PUBLIC_PROTOCOL://$DASHBOARD_HOST
-API_HOST=$API_HOST
-DASHBOARD_HOST=$DASHBOARD_HOST
-PUBLIC_API_URL=$PUBLIC_PROTOCOL://$API_HOST
+HOST_IP=$HOST_IP
+BETTER_AUTH_URL=http://$HOST_IP
+BETTER_AUTH_TRUSTED_ORIGINS=http://$HOST_IP
+DASHBOARD_URL=http://$HOST_IP
+PUBLIC_API_URL=http://$HOST_IP
 S3_ACCESS_KEY=devion-storage
 S3_SECRET_KEY=$storage_secret
 S3_ENDPOINT=http://rustfs:9000
@@ -65,13 +73,29 @@ TRAEFIK_ENABLED=true
 TRAEFIK_DYNAMIC_CONFIG_DIR=/data/traefik/dynamic
 TRAEFIK_CERTS_DIR=/data/traefik/certs
 TRAEFIK_CERTS_TRAEFIK_DIR=/etc/traefik/certs
-TRAEFIK_INTERNAL_DOMAIN=${API_HOST#*.}
+TRAEFIK_INTERNAL_DOMAIN=
+TRAEFIK_PUBLIC_IP=$HOST_IP
+TRAEFIK_ACME_EMAIL=$ACME_EMAIL
 TRAEFIK_PROJECT_UPSTREAM_TEMPLATE=http://devion-project-{projectSlug}:3000
-TRAEFIK_CNAME_TARGET=proxy.${API_HOST#*.}
+# TRAEFIK_CNAME_TARGET=proxy.example.com
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=$HTTPS_PORT
 EOF
   chmod 600 "$ENV_FILE"
+else
+  # Older installations used separate local hostnames and a self-signed HTTPS
+  # certificate. Move only control-plane URLs to the host-IP default; project
+  # domains remain database-managed and are never touched here.
+  info "Migriere Control-Plane auf Host-IP-Zugriff"
+  set_env_value "HOST_IP" "$HOST_IP"
+  set_env_value "BETTER_AUTH_URL" "http://$HOST_IP"
+  set_env_value "BETTER_AUTH_TRUSTED_ORIGINS" "http://$HOST_IP"
+  set_env_value "DASHBOARD_URL" "http://$HOST_IP"
+  set_env_value "PUBLIC_API_URL" "http://$HOST_IP"
+  set_env_value "BETTER_AUTH_COOKIE_DOMAIN" ""
+  set_env_value "TRAEFIK_INTERNAL_DOMAIN" ""
+  set_env_value "TRAEFIK_PUBLIC_IP" "$HOST_IP"
+  set_env_value "TRAEFIK_ACME_EMAIL" "$ACME_EMAIL"
 fi
 
 info "Bereite Traefik-Verzeichnisse vor"
@@ -83,18 +107,12 @@ if [[ ! -f "$INSTALL_DIR/data/traefik/certs/bootstrap.crt" || ! -f "$INSTALL_DIR
   openssl req -x509 -newkey rsa:4096 -sha256 -nodes -days 365 \
     -keyout "$INSTALL_DIR/data/traefik/certs/bootstrap.key" \
     -out "$INSTALL_DIR/data/traefik/certs/bootstrap.crt" \
-    -subj "/CN=$DASHBOARD_HOST" \
-    -addext "subjectAltName=DNS:$DASHBOARD_HOST,DNS:$API_HOST"
+    -subj "/CN=$HOST_IP" \
+    -addext "subjectAltName=IP:$HOST_IP"
   chmod 600 "$INSTALL_DIR/data/traefik/certs/bootstrap.key"
 fi
 touch "$INSTALL_DIR/data/traefik/acme/acme.json"
 chmod 600 "$INSTALL_DIR/data/traefik/acme/acme.json"
-
-if [[ "$HOST_IP" == "127.0.0.1" ]]; then
-  if ! grep -qE "[[:space:]]$API_HOST([[:space:]]|$)" /etc/hosts; then
-    printf '127.0.0.1 %s %s\n' "$API_HOST" "$DASHBOARD_HOST" >> /etc/hosts
-  fi
-fi
 
 info "Baue und starte Devion"
 docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-compose.yml" up --build --detach --remove-orphans
@@ -102,16 +120,14 @@ docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-comp
 info "Warte auf API-Healthcheck"
 for _ in $(seq 1 60); do
   if curl --noproxy "*" --fail --silent --show-error --connect-timeout 2 \
-    --resolve "$API_HOST:$HTTP_PORT:$HOST_IP" \
-    "http://$API_HOST:$HTTP_PORT/health" >/dev/null; then
+    "http://$HOST_IP:$HTTP_PORT/health" >/dev/null; then
     break
   fi
   sleep 2
 done
 curl --noproxy "*" --fail --silent --show-error \
-  --resolve "$API_HOST:$HTTP_PORT:$HOST_IP" \
-  "http://$API_HOST:$HTTP_PORT/health" >/dev/null \
+  "http://$HOST_IP:$HTTP_PORT/health" >/dev/null \
   || fail "API wurde nicht gesund. Logs: docker compose -f $INSTALL_DIR/deploy/docker/docker-compose.yml logs api"
 
 info "Installation erfolgreich"
-printf 'Dashboard: %s://%s\nAPI health: %s://%s/health\n' "$PUBLIC_PROTOCOL" "$DASHBOARD_HOST" "$PUBLIC_PROTOCOL" "$API_HOST"
+printf 'Dashboard: http://%s\nAPI health: http://%s/health\n' "$HOST_IP" "$HOST_IP"

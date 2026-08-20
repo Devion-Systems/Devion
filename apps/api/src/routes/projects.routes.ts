@@ -60,6 +60,12 @@ async function syncTraefikRoutes(
   );
 }
 
+function activeDomains<T extends TraefikDomain & { status: string }>(domains: T[]): TraefikDomain[] {
+  return domains
+    .filter((domain) => domain.status === "active")
+    .map(({ id, hostname }) => ({ id, hostname }));
+}
+
 const projectRoutes = new Hono<AppEnv>();
 projectRoutes.use("/*", requireAuthenticatedUser);
 
@@ -212,19 +218,8 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains", async (c) => {
       return c.json({ error: "Hostname is already assigned to this project" }, 409);
     throw error;
   }
-  try {
-    await syncTraefikRoutes(access.project, [
-      ...existingDomains,
-      { id, hostname: payload.data.hostname },
-    ]);
-  } catch (error) {
-    await db.delete(projectDomains).where(eq(projectDomains.id, id));
-    c.get("logger").error(
-      { error, projectId: access.project.id },
-      "Unable to configure Traefik domain route",
-    );
-    return c.json({ error: "Domain route could not be configured" }, 503);
-  }
+  // Do not publish or request a certificate until ownership has been verified.
+  // The verify endpoint performs the first Traefik sync for this domain.
   return c.json({ id, ...payload.data, status: "pending" }, 201);
 });
 
@@ -251,7 +246,7 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     ? { ...payload.data, status: "pending" as const, sslExpiresAt: null }
     : payload.data;
   const allDomains = await db
-    .select({ id: projectDomains.id, hostname: projectDomains.hostname })
+    .select({ id: projectDomains.id, hostname: projectDomains.hostname, status: projectDomains.status })
     .from(projectDomains)
     .where(eq(projectDomains.projectId, access.project.id));
   const nextDomains = allDomains.map((domain) =>
@@ -268,7 +263,12 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     return c.json({ error: "Hostname is already assigned to this project" }, 409);
   }
   try {
-    await syncTraefikRoutes(access.project, nextDomains);
+    // A changed hostname must be verified again, so remove its old active
+    // route now and wait for the explicit verification before publishing it.
+    await syncTraefikRoutes(
+      access.project,
+      activeDomains(payload.data.hostname ? nextDomains.filter((domain) => domain.id !== current.id) : nextDomains),
+    );
   } catch (error) {
     c.get("logger").error(
       { error, projectId: access.project.id },
@@ -304,13 +304,13 @@ projectRoutes.delete("/:orgSlug/projects/:projectId/domains/:domainId", async (c
   });
   if (!current) return c.json({ error: "Domain not found" }, 404);
   const remainingDomains = await db
-    .select({ id: projectDomains.id, hostname: projectDomains.hostname })
+    .select({ id: projectDomains.id, hostname: projectDomains.hostname, status: projectDomains.status })
     .from(projectDomains)
     .where(eq(projectDomains.projectId, access.project.id));
   try {
     await syncTraefikRoutes(
       access.project,
-      remainingDomains.filter((domain) => domain.id !== current.id),
+      activeDomains(remainingDomains.filter((domain) => domain.id !== current.id)),
     );
   } catch (error) {
     c.get("logger").error(
@@ -351,6 +351,24 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains/:domainId/verify", asy
   }
 
   const verified = await dnsManager.verifyDomain(domain.hostname);
+  if (verified) {
+    const allDomains = await db
+      .select({ id: projectDomains.id, hostname: projectDomains.hostname, status: projectDomains.status })
+      .from(projectDomains)
+      .where(eq(projectDomains.projectId, access.project.id));
+    try {
+      await syncTraefikRoutes(access.project, [
+        ...activeDomains(allDomains.filter((item) => item.id !== domain.id)),
+        { id: domain.id, hostname: domain.hostname },
+      ]);
+    } catch (error) {
+      c.get("logger").error(
+        { error, projectId: access.project.id, hostname: domain.hostname },
+        "Unable to publish verified Traefik domain route",
+      );
+      return c.json({ error: "Domain was verified but could not be published" }, 503);
+    }
+  }
   const [result] = await db
     .update(projectDomains)
     .set({ status: verified ? "active" : "pending" })
