@@ -91,9 +91,13 @@ services:
       retries: 12
     labels:
       - traefik.enable=true
-      - traefik.http.routers.devion-api.rule=Host(`${API_HOST}`)
-      - traefik.http.routers.devion-api.entrypoints=web,websecure
-      - traefik.http.routers.devion-api.tls=true
+      # HTTP and HTTPS need distinct routers. A TLS router must not be reused
+      # for requests received on the plaintext `web` entrypoint.
+      - traefik.http.routers.devion-api-http.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.devion-api-http.entrypoints=web
+      - traefik.http.routers.devion-api-https.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.devion-api-https.entrypoints=websecure
+      - traefik.http.routers.devion-api-https.tls=true
       - traefik.http.services.devion-api.loadbalancer.server.port=3000
     networks: [devion]
 
@@ -116,9 +120,11 @@ services:
       retries: 12
     labels:
       - traefik.enable=true
-      - traefik.http.routers.devion-dashboard.rule=Host(`${DASHBOARD_HOST}`)
-      - traefik.http.routers.devion-dashboard.entrypoints=web,websecure
-      - traefik.http.routers.devion-dashboard.tls=true
+      - traefik.http.routers.devion-dashboard-http.rule=Host(`${DASHBOARD_HOST}`)
+      - traefik.http.routers.devion-dashboard-http.entrypoints=web
+      - traefik.http.routers.devion-dashboard-https.rule=Host(`${DASHBOARD_HOST}`)
+      - traefik.http.routers.devion-dashboard-https.entrypoints=websecure
+      - traefik.http.routers.devion-dashboard-https.tls=true
       - traefik.http.services.devion-dashboard.loadbalancer.server.port=3000
     networks: [devion]
 
