@@ -3,8 +3,25 @@
 The API writes one JSON file per project into Traefik's file-provider directory.
 Every file contains the internal project subdomain and all custom domains of the
 project. Traefik watches the directory and applies changes without a restart.
-Seed the mounted directory with `dynamic/security.yml` from this folder; it
+Seed the mounted directory with the files in `dynamic/` from this folder. The
+Docker provider in `traefik.yml` discovers the API and dashboard Compose
+services; `platform.yml` is kept as a file-provider fallback. `security.yml`
 enforces TLS 1.2+ and strict SNI for every routed hostname.
+
+## Local HTTP and HTTPS
+
+The `web` (HTTP) and `websecure` (HTTPS) entrypoints are both active. Local
+installations default to HTTP, because a self-signed bootstrap certificate
+cannot be trusted by another machine automatically. Use `devion.test`, not
+`devion.local`, on macOS: `.local` is reserved by Bonjour/mDNS.
+
+For HTTPS on a development network, create a certificate whose SAN contains
+both `dashboard.devion.test` and `api.devion.test`, trust its issuing CA on
+every browser machine, and place it at
+`data/traefik/certs/bootstrap.crt` and `data/traefik/certs/bootstrap.key`.
+Then set all public URLs (`PUBLIC_API_URL`, `DASHBOARD_URL`, Better Auth URLs)
+to `https://...`. For an internet-facing deployment, use a public DNS name and
+Let’s Encrypt instead; ACME cannot issue a certificate for `.local` or `.test`.
 
 Mount the same writable directory into the API and read-only into Traefik:
 

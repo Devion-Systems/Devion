@@ -23,12 +23,16 @@ curl -fsSL https://raw.githubusercontent.com/Devion-Systems/Devion/main/install.
   sudo DEVION_REPOSITORY_URL=https://github.com/YOUR_ORG/Devion.git bash
 ```
 
-Local defaults are `https://dashboard.devion.local` and
-`https://api.devion.local/health`. The installer adds those names to
-`/etc/hosts` when using the default local IP address. Traefik uses HTTPS; the
-local certificate is intentionally accepted by the install health check with
-`--insecure`. Upload a trusted certificate through the Admin Center for a
-public deployment.
+Local defaults are `http://dashboard.devion.test` and
+`http://api.devion.test/health`. `.test` is reserved for testing and avoids
+the Bonjour/mDNS behaviour macOS applies to `.local`. HTTP and HTTPS are both
+served, but HTTP is the local default so browsers do not reject the generated
+bootstrap certificate. The installer adds those names to `/etc/hosts` only
+when using the default local IP address.
+
+For trusted HTTPS, use a public domain with a valid certificate, or install a
+locally trusted certificate (for example with `mkcert`) in
+`data/traefik/certs/` and set `DEVION_PUBLIC_PROTOCOL=https` before installing.
 
 ## Useful commands
 
@@ -38,9 +42,9 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml
 docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml logs -f api
 ```
 
-To change hostnames or ports, set `DEVION_API_HOST`,
-`DEVION_DASHBOARD_HOST`, `DEVION_HTTP_PORT`, or `DEVION_HTTPS_PORT` before
-running the installer.
+To change hostnames, ports, or the public protocol, set `DEVION_API_HOST`,
+`DEVION_DASHBOARD_HOST`, `DEVION_HTTP_PORT`, `DEVION_HTTPS_PORT`, or
+`DEVION_PUBLIC_PROTOCOL` before running the installer.
 
 ## Local development
 

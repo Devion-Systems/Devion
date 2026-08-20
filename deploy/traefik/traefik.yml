@@ -1,4 +1,11 @@
 providers:
+  # The platform services are declared through Compose labels. Keeping this
+  # provider enabled also makes a plain `docker compose up` usable; the file
+  # provider below remains responsible for project and certificate routes.
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: devion
   file:
     # Verweist auf das Verzeichnis, in dem deine Steuerungsebene (Control Plane)
     # die dynamischen Konfigurationen für die Firecracker-VMs ablegt.
@@ -8,11 +15,6 @@ providers:
 entryPoints:
   web:
     address: ":80"
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
 
   websecure:
     address: ":443"

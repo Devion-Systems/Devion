@@ -5,12 +5,12 @@ http:
   routers:
     devion-api:
       rule: "HostRegexp(`^api\\..+$`)"
-      entryPoints: [websecure]
+      entryPoints: [web, websecure]
       service: devion-api
       tls: {}
     devion-dashboard:
       rule: "HostRegexp(`^dashboard\\..+$`)"
-      entryPoints: [websecure]
+      entryPoints: [web, websecure]
       service: devion-dashboard
       tls: {}
   services:

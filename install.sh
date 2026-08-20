@@ -5,11 +5,12 @@ REPOSITORY_URL="${DEVION_REPOSITORY_URL:-https://github.com/Devion-Systems/Devio
 VERSION="${DEVION_VERSION:-main}"
 INSTALL_DIR="${DEVION_INSTALL_DIR:-/opt/devion}"
 HOST_IP="${DEVION_HOST_IP:-127.0.0.1}"
-API_HOST="${DEVION_API_HOST:-api.devion.local}"
-DASHBOARD_HOST="${DEVION_DASHBOARD_HOST:-dashboard.devion.local}"
+API_HOST="${DEVION_API_HOST:-api.devion.test}"
+DASHBOARD_HOST="${DEVION_DASHBOARD_HOST:-dashboard.devion.test}"
 AUTH_COOKIE_DOMAIN="${DEVION_AUTH_COOKIE_DOMAIN:-${API_HOST#*.}}"
 HTTP_PORT="${DEVION_HTTP_PORT:-80}"
 HTTPS_PORT="${DEVION_HTTPS_PORT:-443}"
+PUBLIC_PROTOCOL="${DEVION_PUBLIC_PROTOCOL:-http}"
 
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
@@ -21,6 +22,8 @@ command -v docker >/dev/null || fail "Docker Engine muss installiert sein."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 muss installiert sein."
 command -v openssl >/dev/null || fail "openssl muss installiert sein."
 command -v curl >/dev/null || fail "curl muss installiert sein."
+[[ "$PUBLIC_PROTOCOL" == "http" || "$PUBLIC_PROTOCOL" == "https" ]] \
+  || fail "DEVION_PUBLIC_PROTOCOL muss http oder https sein."
 
 if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR/.git" ]]; then
   fail "$INSTALL_DIR existiert, ist aber keine Devion-Git-Installation."
@@ -47,12 +50,13 @@ POSTGRES_USER=devion
 POSTGRES_PASSWORD=$db_password
 DATABASE_URL=postgres://devion:$db_password@postgres:5432/devion
 BETTER_AUTH_SECRET=$auth_secret
-BETTER_AUTH_URL=https://$API_HOST
-BETTER_AUTH_TRUSTED_ORIGINS=https://$DASHBOARD_HOST
+BETTER_AUTH_URL=$PUBLIC_PROTOCOL://$API_HOST
+BETTER_AUTH_TRUSTED_ORIGINS=$PUBLIC_PROTOCOL://$DASHBOARD_HOST
 BETTER_AUTH_COOKIE_DOMAIN=$AUTH_COOKIE_DOMAIN
-DASHBOARD_URL=https://$DASHBOARD_HOST
+DASHBOARD_URL=$PUBLIC_PROTOCOL://$DASHBOARD_HOST
 API_HOST=$API_HOST
 DASHBOARD_HOST=$DASHBOARD_HOST
+PUBLIC_API_URL=$PUBLIC_PROTOCOL://$API_HOST
 S3_ACCESS_KEY=devion-storage
 S3_SECRET_KEY=$storage_secret
 S3_ENDPOINT=http://rustfs:9000
@@ -61,9 +65,9 @@ TRAEFIK_ENABLED=true
 TRAEFIK_DYNAMIC_CONFIG_DIR=/data/traefik/dynamic
 TRAEFIK_CERTS_DIR=/data/traefik/certs
 TRAEFIK_CERTS_TRAEFIK_DIR=/etc/traefik/certs
-TRAEFIK_INTERNAL_DOMAIN=devion.local
+TRAEFIK_INTERNAL_DOMAIN=${API_HOST#*.}
 TRAEFIK_PROJECT_UPSTREAM_TEMPLATE=http://devion-project-{projectSlug}:3000
-TRAEFIK_CNAME_TARGET=proxy.devion.local
+TRAEFIK_CNAME_TARGET=proxy.${API_HOST#*.}
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=$HTTPS_PORT
 EOF
@@ -97,17 +101,17 @@ docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-comp
 
 info "Warte auf API-Healthcheck"
 for _ in $(seq 1 60); do
-  if curl --noproxy "*" --fail --silent --show-error --insecure --connect-timeout 2 \
-    --resolve "$API_HOST:$HTTPS_PORT:$HOST_IP" \
-    "https://$API_HOST:$HTTPS_PORT/health" >/dev/null; then
+  if curl --noproxy "*" --fail --silent --show-error --connect-timeout 2 \
+    --resolve "$API_HOST:$HTTP_PORT:$HOST_IP" \
+    "http://$API_HOST:$HTTP_PORT/health" >/dev/null; then
     break
   fi
   sleep 2
 done
-curl --noproxy "*" --fail --silent --show-error --insecure \
-  --resolve "$API_HOST:$HTTPS_PORT:$HOST_IP" \
-  "https://$API_HOST:$HTTPS_PORT/health" >/dev/null \
+curl --noproxy "*" --fail --silent --show-error \
+  --resolve "$API_HOST:$HTTP_PORT:$HOST_IP" \
+  "http://$API_HOST:$HTTP_PORT/health" >/dev/null \
   || fail "API wurde nicht gesund. Logs: docker compose -f $INSTALL_DIR/deploy/docker/docker-compose.yml logs api"
 
 info "Installation erfolgreich"
-printf 'Dashboard: https://%s\nAPI health: https://%s/health\n' "$DASHBOARD_HOST" "$API_HOST"
+printf 'Dashboard: %s://%s\nAPI health: %s://%s/health\n' "$PUBLIC_PROTOCOL" "$DASHBOARD_HOST" "$PUBLIC_PROTOCOL" "$API_HOST"
