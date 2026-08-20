@@ -2,7 +2,10 @@
 
 import { ArrowRight, AtSign, KeyRound } from "lucide-react";
 import Link from "next/link";
-import type { FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useState } from "react";
+
+import { authClient } from "@/lib/auth-client";
 
 import {
   AuthButton,
@@ -12,8 +15,31 @@ import {
 } from "../_components/AuthPrimitives";
 
 export default function LoginPage() {
-  function previewOnly(event: FormEvent<HTMLFormElement>) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError(null);
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+
+    setIsSubmitting(true);
+    try {
+      const { error: signInError } = await authClient.signIn.email({ email, password });
+      if (signInError) {
+        setError(signInError.message ?? "Invalid email address or password.");
+        return;
+      }
+      router.replace("/select-organization");
+      router.refresh();
+    } catch {
+      setError("Unable to reach the authentication service. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -24,7 +50,7 @@ export default function LoginPage() {
         description="Sign in to manage projects, deployments and the infrastructure behind them."
       />
 
-      <form className="space-y-5" onSubmit={previewOnly}>
+      <form className="space-y-5" onSubmit={login}>
         <AuthField
           id="email"
           name="email"
@@ -62,8 +88,14 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <AuthButton>
-          Sign in
+        {error ? (
+          <p className="rounded-lg border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-200" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <AuthButton disabled={isSubmitting}>
+          {isSubmitting ? "Signing in..." : "Sign in"}
           <ArrowRight className="size-4 transition-transform group-hover/button:translate-x-0.5" />
         </AuthButton>
       </form>

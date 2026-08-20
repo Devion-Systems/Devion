@@ -2,7 +2,10 @@
 
 import { ArrowRight, AtSign, KeyRound, UserRound } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+
+import { authClient } from "@/lib/auth-client";
 
 import {
   AuthButton,
@@ -35,10 +38,55 @@ function FormSection({
 }
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function previewOnly(event: FormEvent<HTMLFormElement>) {
+  async function register(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError(null);
+
+    const formData = new FormData(event.currentTarget);
+    const firstName = String(formData.get("firstName") ?? "").trim();
+    const lastName = String(formData.get("lastName") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim();
+    const confirmation = String(formData.get("confirmation") ?? "");
+
+    if (!firstName || !lastName || !email || !password) {
+      setError("Please complete all required fields.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Your password must contain at least 8 characters.");
+      return;
+    }
+    if (password !== confirmation) {
+      setError("The passwords do not match.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const { error: signUpError } = await authClient.signUp.email({
+        name: `${firstName} ${lastName}`,
+        email,
+        password,
+        callbackURL: "/create-organization",
+      });
+
+      if (signUpError) {
+        setError(signUpError.message ?? "Unable to create your account.");
+        return;
+      }
+
+      router.replace("/create-organization");
+      router.refresh();
+    } catch {
+      setError("Unable to reach the authentication service. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -49,7 +97,7 @@ export default function RegisterPage() {
         description="Create one account for projects, deployments and infrastructure."
       />
 
-      <form className="space-y-4" onSubmit={previewOnly}>
+      <form className="space-y-4" onSubmit={register}>
         <div className="space-y-3">
           <FormSection
             number="01"
@@ -125,8 +173,14 @@ export default function RegisterPage() {
           </div>
         </div>
 
-        <AuthButton>
-          Create account
+        {error ? (
+          <p className="rounded-lg border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-200" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <AuthButton disabled={isSubmitting}>
+          {isSubmitting ? "Creating account..." : "Create account"}
           <ArrowRight className="size-4 transition-transform group-hover/button:translate-x-0.5" />
         </AuthButton>
       </form>

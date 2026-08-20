@@ -7,6 +7,7 @@ import { admin, organization, twoFactor } from "better-auth/plugins";
 import { sendEmail } from "../email/index.js";
 
 const env = parseEnv();
+const emailVerificationEnabled = Boolean(env.SMTP_HOST && env.SMTP_FROM);
 const trustedOrigins = [
   env.BETTER_AUTH_URL,
   ...(env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
@@ -54,11 +55,11 @@ export const auth = betterAuth({
         text: `Verify your email address by opening this link: ${url}`,
       });
     },
-    sendOnSignUp: true,
+    sendOnSignUp: emailVerificationEnabled,
   },
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
+    requireEmailVerification: emailVerificationEnabled,
     autoSignInAfterVerification: true,
     sendResetPassword: async ({ user, url }) => {
       await sendRequiredAuthEmail({
