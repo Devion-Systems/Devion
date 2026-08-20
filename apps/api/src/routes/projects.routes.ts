@@ -88,8 +88,16 @@ async function getAuthorizedOrganization(request: Request, slug: string) {
   });
   if (!membership) return null;
 
-  return { organization: organizationRecord, userId: session.user.id };
+  return { organization: organizationRecord, membership, userId: session.user.id };
 }
+
+/** Returns the organisation and the caller's membership for the dashboard shell. */
+projectRoutes.get("/:orgSlug", async (c) => {
+  const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
+  if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+
+  return c.json({ org: access.organization, membership: access.membership });
+});
 
 projectRoutes.get("/:orgSlug/projects", async (c) => {
   const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
