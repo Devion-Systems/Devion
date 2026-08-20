@@ -7,7 +7,7 @@ export default function DatabasesNewPage() {
   const { orgSlug } = useParams<{ orgSlug: string }>();
   const router = useRouter();
   const [name, setName] = useState("");
-  const [engine, setEngine] = useState("postgresql");
+  const engine = "postgresql";
   const [version, setVersion] = useState("16");
   const [plan, setPlan] = useState("starter");
   const [message, setMessage] = useState<string | null>(null);
@@ -26,14 +26,23 @@ export default function DatabasesNewPage() {
       setMessage("Provisionierung konnte nicht gestartet werden.");
       return;
     }
-    const data = (await response.json()) as { id: string };
+    const data = (await response.json()) as {
+      id: string;
+      connection?: { url: string; password: string };
+    };
+    if (data.connection) {
+      sessionStorage.setItem(
+        `devion-db-connection:${data.id}`,
+        data.connection.url,
+      );
+    }
     router.push(`/${orgSlug}/databases/${data.id}/settings/general`);
   }
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-5 sm:p-7">
       <PageHeader
         title="Neue Datenbank"
-        description="Wähle Engine, Version und Leistungsprofil. Die Provisionierung startet anschließend."
+        description="PostgreSQL wird isoliert auf diesem Devion-Host mit dem gewählten Ressourcenprofil bereitgestellt."
       />
       <form
         className="space-y-4 rounded-2xl border border-white/[0.07] bg-[#172128] p-6"
@@ -57,31 +66,9 @@ export default function DatabasesNewPage() {
             required
           />
         </label>
-        <label
-          className="block space-y-2 text-sm text-zinc-300"
-          htmlFor="database-engine"
-        >
-          Engine
-          <select
-            id="database-engine"
-            className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3"
-            value={engine}
-            onChange={(event) => {
-              setEngine(event.target.value);
-              setVersion(
-                event.target.value === "redis"
-                  ? "7"
-                  : event.target.value === "mysql"
-                    ? "8.4"
-                    : "16",
-              );
-            }}
-          >
-            <option value="postgresql">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
-            <option value="redis">Redis</option>
-          </select>
-        </label>
+        <div className="rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 py-2 text-sm text-zinc-300">
+          Engine: <strong>PostgreSQL</strong>
+        </div>
         <label
           className="block space-y-2 text-sm text-zinc-300"
           htmlFor="database-version"

@@ -81,6 +81,10 @@ services:
     volumes:
       - ../../data/traefik/dynamic:/data/traefik/dynamic
       - ../../data/traefik/certs:/data/traefik/certs
+      # Managed PostgreSQL instances are created through the local Docker API.
+      # They are labelled and restricted by the API; no database port is
+      # published on the host.
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       migrate:
         condition: service_completed_successfully
