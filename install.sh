@@ -45,13 +45,14 @@ install_docker() {
 }
 prepare_host() {
   [[ -r /etc/os-release ]] || fail "Nur Linux-Systeme mit /etc/os-release werden unterstützt."
-  . /etc/os-release
-  local manager distribution codename
-  case "${ID:-}" in
-    ubuntu|debian) manager=apt; distribution="$ID"; codename="${VERSION_CODENAME:-}" ;;
+  local manager distribution codename os_id
+  os_id="$(. /etc/os-release; printf '%s' "$ID")"
+  codename="$(. /etc/os-release; printf '%s' "${VERSION_CODENAME:-}")"
+  case "$os_id" in
+    ubuntu|debian) manager=apt; distribution="$os_id" ;;
     fedora) manager=dnf; distribution=fedora; codename="" ;;
     rhel|centos|rocky|almalinux) manager=dnf; distribution=centos; codename="" ;;
-    *) fail "Nicht unterstütztes Linux: ${PRETTY_NAME:-$ID}" ;;
+    *) fail "Nicht unterstütztes Linux: $os_id" ;;
   esac
   info "Installiere und prüfe Systemabhängigkeiten"
   install_base_packages "$manager"
