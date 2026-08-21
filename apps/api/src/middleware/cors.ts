@@ -1,16 +1,27 @@
 import { cors } from "hono/cors";
 
 function configuredOrigins() {
-  const origins =
-    process.env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean) ?? [];
-  const authOrigin = process.env.BETTER_AUTH_URL;
-  return authOrigin ? [...new Set([authOrigin, ...origins])] : origins;
+  const rawOrigins = [
+    process.env.BETTER_AUTH_URL,
+    ...(process.env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",") ?? []),
+  ].filter((origin): origin is string => Boolean(origin?.trim()));
+  return [...new Set(rawOrigins.flatMap((origin) => {
+    try {
+      return [new URL(origin.trim()).origin];
+    } catch {
+      // An invalid origin must never accidentally become trusted.
+      return [];
+    }
+  }))];
 }
 
 export function isTrustedBrowserOrigin(origin: string | undefined) {
-  return Boolean(origin && configuredOrigins().includes(origin));
+  if (!origin) return false;
+  try {
+    return configuredOrigins().includes(new URL(origin).origin);
+  } catch {
+    return false;
+  }
 }
 
 /**

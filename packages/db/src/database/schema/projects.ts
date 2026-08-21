@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { organization, team, user } from "./auth.js";
 
 /** Projects are always scoped to an organization and can optionally belong to a team. */
@@ -64,5 +64,120 @@ export const projectDomains = pgTable(
     uniqueIndex("project_domains_project_hostname_uidx").on(table.projectId, table.hostname),
     index("project_domains_organization_idx").on(table.organizationId),
     index("project_domains_project_idx").on(table.projectId),
+  ],
+);
+
+/**
+ * An application is a deployable unit inside a project. Runtime state is
+ * intentionally only updated by a future deployment service, never by a
+ * dashboard request.
+ */
+export const applications = pgTable(
+  "applications",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    sourceType: text("source_type", { enum: ["git", "docker"] }).notNull(),
+    gitUrl: text("git_url"),
+    imageName: text("image_name"),
+    containerName: text("container_name").unique(),
+    internalPort: integer("internal_port").default(3000).notNull(),
+    branch: text("branch").default("main").notNull(),
+    status: text("status", {
+      enum: ["draft", "ready", "deploying", "healthy", "degraded", "failed", "stopped"],
+    })
+      .default("draft")
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("applications_project_slug_uidx").on(table.projectId, table.slug),
+    index("applications_organization_idx").on(table.organizationId),
+    index("applications_project_idx").on(table.projectId),
+  ],
+);
+
+/** Immutable lifecycle events emitted by the application runtime. */
+export const applicationDeployments = pgTable(
+  "application_deployments",
+  {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    action: text("action", { enum: ["deploy", "stop"] }).notNull(),
+    status: text("status", { enum: ["succeeded", "failed"] }).notNull(),
+    message: text("message").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("application_deployments_application_idx").on(table.applicationId, table.createdAt)],
+);
+
+/** Whitelisted game-server workloads; arbitrary images are deliberately not accepted. */
+export const gameServers = pgTable(
+  "game_servers",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").notNull().references(() => user.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    game: text("game", { enum: ["minecraft-java"] }).notNull(),
+    version: text("version").default("LATEST").notNull(),
+    memoryMib: integer("memory_mib").default(2048).notNull(),
+    containerName: text("container_name").notNull().unique(),
+    status: text("status", { enum: ["provisioning", "running", "stopped", "failed"] }).default("provisioning").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [index("game_servers_organization_idx").on(table.organizationId)],
+);
+
+/** Persisted deployment configuration. Runtime facts are supplied by agents separately. */
+export const projectEnvironments = pgTable(
+  "project_environments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    displayName: text("display_name").notNull(),
+    branch: text("branch").default("main").notNull(),
+    autoDeployEnabled: boolean("auto_deploy_enabled").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex("project_environments_project_name_uidx").on(table.projectId, table.name),
+    index("project_environments_organization_idx").on(table.organizationId),
+    index("project_environments_project_idx").on(table.projectId),
+  ],
+);
+
+/** Values are encrypted by the API before persistence; secrets are never returned. */
+export const environmentVariables = pgTable(
+  "environment_variables",
+  {
+    id: text("id").primaryKey(),
+    environmentId: text("environment_id").notNull().references(() => projectEnvironments.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    valueEncrypted: text("value_encrypted").notNull(),
+    isSecret: boolean("is_secret").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex("environment_variables_environment_key_uidx").on(table.environmentId, table.key),
+    index("environment_variables_environment_idx").on(table.environmentId),
   ],
 );

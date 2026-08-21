@@ -1,5 +1,5 @@
 import {
-  AppWindow, Bot, Boxes, Building2, Database, FolderKanban, Gauge, HardDrive,
+  AppWindow, Bot, Boxes, Building2, Database, FolderKanban, Gamepad2, Gauge, HardDrive,
   LayoutDashboard, Network, Radio, RefreshCw, ScrollText, Server, Settings,
   Share2, ShieldCheck, UserCog, Users, Wrench,
 } from "lucide-react";
@@ -14,9 +14,10 @@ export function getOrgNavGroups(orgSlug: string): NavGroup[] {
     { title: "Übersicht", icon: LayoutDashboard, defaultOpen: true, items: [{ label: "Dashboard", href: base, icon: LayoutDashboard }] },
     { title: "Projekte", icon: FolderKanban, defaultOpen: true, items: [{ label: "Alle Projekte", href: `${base}/projects`, icon: FolderKanban }] },
     { title: "Workloads", icon: AppWindow, items: [
-      { label: "Anwendungen", href: `${base}/applications`, icon: AppWindow, planned: true },
+      { label: "Anwendungen", href: `${base}/applications`, icon: AppWindow },
       { label: "Deployments", href: `${base}/deployments`, icon: Boxes, planned: true },
       { label: "Builds", href: `${base}/builds`, icon: Wrench, planned: true },
+      { label: "Game Server", href: `${base}/game-servers`, icon: Gamepad2 },
     ] },
     { title: "Infrastruktur", icon: Server, defaultOpen: true, items: [
       { label: "Hardware", href: `${base}/hardware`, icon: Server },

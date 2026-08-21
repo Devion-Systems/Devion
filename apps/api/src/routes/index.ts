@@ -1,11 +1,15 @@
 import { Hono } from "hono";
+import { csrfOriginMiddleware } from "../middleware/csrf-origin.js";
 import type { AppEnv } from "../types/env.js";
 import { aiGatewayRoutes } from "./ai-gateway.routes.js";
+import { applicationRoutes } from "./applications.routes.js";
 import { adminOrganizationRoutes } from "./admin-organizations.routes.js";
 import { analyticsRoutes } from "./analytics.routes.js";
 import { authRoutes } from "./auth.routes.js";
 import { dashboardTlsRoutes } from "./dashboard-tls.routes.js";
+import { environmentRoutes } from "./environments.routes.js";
 import { featureRoutes } from "./features.routes.js";
+import { gameServerRoutes } from "./game-servers.routes.js";
 import { healthRoutes } from "./health.routes.js";
 import { managedDatabaseRoutes } from "./managed-databases.routes.js";
 import { projectRoutes } from "./projects.routes.js";
@@ -18,6 +22,11 @@ import { vmRoutes } from "./vms.routes.js";
  * All feature route groups are mounted here under their respective prefixes.
  */
 const routes = new Hono<AppEnv>();
+
+// Organization and admin mutations use browser sessions, therefore enforce
+// configured dashboard origins when the request comes from a browser.
+routes.use("/organizations/*", csrfOriginMiddleware());
+routes.use("/api/admin/*", csrfOriginMiddleware());
 
 // Health checks (no /api prefix — exposed at root for probes)
 routes.route("/health", healthRoutes);
@@ -40,6 +49,9 @@ routes.route("/api/admin/system-updates", systemUpdateRoutes);
 
 // Organization-scoped application resources
 routes.route("/organizations", projectRoutes);
+routes.route("/organizations", applicationRoutes);
+routes.route("/organizations", environmentRoutes);
+routes.route("/organizations", gameServerRoutes);
 routes.route("/organizations", managedDatabaseRoutes);
 routes.route("/organizations", teamRoutes);
 

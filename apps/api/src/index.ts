@@ -8,6 +8,7 @@ import {
   globalErrorHandler,
   requestIdMiddleware,
   requestLoggerMiddleware,
+  securityHeadersMiddleware,
 } from "./middleware/index.js";
 import { routes } from "./routes/index.js";
 import type { AppEnv } from "./types/env.js";
@@ -23,6 +24,7 @@ app.use("*", corsMiddleware());
 app.use("*", bodyLimit({ maxSize: 10 * 1024 * 1024 }));
 app.use("*", requestIdMiddleware());
 app.use("*", requestLoggerMiddleware());
+app.use("*", securityHeadersMiddleware());
 
 // --- Global error handling ---
 app.onError(globalErrorHandler);

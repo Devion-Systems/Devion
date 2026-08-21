@@ -91,6 +91,10 @@ async function getAuthorizedOrganization(request: Request, slug: string) {
   return { organization: organizationRecord, membership, userId: session.user.id };
 }
 
+function canManageOrganization(role: string) {
+  return role === "owner" || role === "admin";
+}
+
 /** Returns the organisation and the caller's membership for the dashboard shell. */
 projectRoutes.get("/:orgSlug", async (c) => {
   const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
@@ -166,6 +170,8 @@ projectRoutes.get("/:orgSlug/dashboard", async (c) => {
 projectRoutes.post("/:orgSlug/projects", async (c) => {
   const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+  if (!canManageOrganization(access.membership.role))
+    return c.json({ error: "Owner or admin role required" }, 403);
 
   const payload = projectInputSchema.safeParse(await c.req.json());
   if (!payload.success)
@@ -268,6 +274,8 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains", async (c) => {
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!canManageOrganization(access.membership.role))
+    return c.json({ error: "Owner or admin role required" }, 403);
   const payload = domainInputSchema.safeParse(await c.req.json());
   if (!payload.success) return c.json({ error: "Invalid hostname" }, 400);
 
@@ -333,6 +341,8 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!canManageOrganization(access.membership.role))
+    return c.json({ error: "Owner or admin role required" }, 403);
   const payload = domainInputSchema.partial().safeParse(await c.req.json());
   if (!payload.success || Object.keys(payload.data).length === 0)
     return c.json({ error: "Invalid domain update" }, 400);
@@ -407,6 +417,8 @@ projectRoutes.delete("/:orgSlug/projects/:projectId/domains/:domainId", async (c
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!canManageOrganization(access.membership.role))
+    return c.json({ error: "Owner or admin role required" }, 403);
   const current = await db.query.projectDomains.findFirst({
     where: and(
       eq(projectDomains.id, c.req.param("domainId")),
@@ -454,6 +466,8 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains/:domainId/verify", asy
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!canManageOrganization(access.membership.role))
+    return c.json({ error: "Owner or admin role required" }, 403);
   const domain = await db.query.projectDomains.findFirst({
     where: and(
       eq(projectDomains.id, c.req.param("domainId")),

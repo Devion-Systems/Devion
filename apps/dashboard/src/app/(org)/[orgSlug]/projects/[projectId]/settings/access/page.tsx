@@ -1,49 +1,6 @@
-'use client'
-
-import { useParams } from 'next/navigation'
-import { PageHeader } from '@/components/layout/page-header'
-import { Button } from '@/components/ui/button'
-import { ShieldCheck, Plus, User, X } from 'lucide-react'
-
-const MOCK_ACCESS = [
-  { id: '1', name: 'Jason Janzen',  email: 'jason@example.com',  role: 'Owner' },
-  { id: '2', name: 'Sarah König',   email: 'sarah@example.com',  role: 'Admin' },
-  { id: '3', name: 'Tom Müller',    email: 'tom@example.com',    role: 'Developer' },
-]
-
-export default function ProjectSettingsAccessPage() {
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Zugriff" description="Wer kann dieses Projekt sehen und deployen" />
-
-      <div className="rounded-xl border border-white/[0.06] bg-[#1e272e]">
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-          <p className="text-sm font-semibold text-zinc-100">Mitglieder mit Zugriff</p>
-          <Button size="sm" variant="outline" className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" />
-            Hinzufügen
-          </Button>
-        </div>
-        <div className="divide-y divide-white/[0.04]">
-          {MOCK_ACCESS.map((m) => (
-            <div key={m.id} className="flex items-center gap-4 px-5 py-3.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0984e3]/20 text-xs font-semibold text-[#0984e3]">
-                {m.name.charAt(0)}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-zinc-200">{m.name}</p>
-                <p className="text-xs text-zinc-500">{m.email}</p>
-              </div>
-              <span className="rounded-full border border-white/[0.06] px-2.5 py-0.5 text-xs text-zinc-400">
-                {m.role}
-              </span>
-              <button type="button" className="rounded p-1 text-zinc-600 hover:bg-red-400/10 hover:text-red-400">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
+"use client";
+import { useQuery } from "@tanstack/react-query";
+import { useParams } from "next/navigation";
+import { PageHeader } from "@/components/layout/page-header";
+type Member = { userId: string; name: string; email: string; role: string };
+export default function ProjectSettingsAccessPage() { const { orgSlug } = useParams<{ orgSlug: string }>(); const members = useQuery<Member[]>({ queryKey: ["org", orgSlug, "members"], queryFn: async () => { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/organizations/${orgSlug}/team-members`, { credentials: "include" }); if (!response.ok) throw new Error("Mitglieder konnten nicht geladen werden"); return response.json(); } }); return <div className="space-y-6 p-6"><PageHeader title="Zugriff" description="Der Projektzugriff folgt aktuell den echten Rollen der Organisation." /><section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#172128]">{members.isLoading ? <p className="p-5 text-sm text-zinc-500">Mitglieder werden geladen …</p> : null}{(members.data ?? []).map((member) => <div key={member.userId} className="flex items-center gap-3 border-b border-white/[0.05] px-5 py-3 last:border-0"><span className="grid size-8 place-items-center rounded-full bg-[#0984e3]/15 text-xs text-[#81ecec]">{member.name.slice(0, 1).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm text-zinc-200">{member.name}</span><span className="block truncate text-xs text-zinc-500">{member.email}</span></span><span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-xs text-zinc-400">{member.role}</span></div>)}{!members.isLoading && !members.data?.length ? <p className="p-8 text-center text-sm text-zinc-500">Keine Organisationsmitglieder gefunden.</p> : null}</section></div>; }

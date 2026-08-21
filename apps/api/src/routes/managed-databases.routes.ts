@@ -107,6 +107,7 @@ routes.get("/:orgSlug/databases", async (c) => {
 routes.post("/:orgSlug/databases", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
+  if (!canManageDatabases(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
   const parsed = input.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid database configuration" }, 400);
   const id = crypto.randomUUID();
@@ -240,6 +241,7 @@ routes.post("/:orgSlug/databases/:databaseId/retry", async (c) => {
 routes.patch("/:orgSlug/databases/:databaseId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
+  if (!canManageDatabases(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
   const parsed = updateInput.partial().safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid database configuration" }, 400);
   const current = await db.query.managedDatabases.findFirst({

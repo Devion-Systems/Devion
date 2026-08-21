@@ -26,14 +26,15 @@ export const globalErrorHandler: ErrorHandler<AppEnv> = (err, c) => {
 
   if (err instanceof AppError) {
     const status = errorCodeToStatus[err.code] ?? 500;
-    logger.warn({ err, code: err.code }, "Handled application error");
+    logger.warn({ err, code: err.code, requestId: c.get("requestId") }, "Handled application error");
 
     return c.json(
       {
         error: {
           code: err.code,
           message: err.message,
-          ...(err.details ? { details: err.details } : {}),
+          ...(err.expose && err.details ? { details: err.details } : {}),
+          requestId: c.get("requestId"),
         },
       },
       status,
@@ -41,13 +42,14 @@ export const globalErrorHandler: ErrorHandler<AppEnv> = (err, c) => {
   }
 
   // Unexpected error
-  logger.error({ err }, "Unhandled error");
+  logger.error({ err, requestId: c.get("requestId") }, "Unhandled error");
 
   return c.json(
     {
       error: {
         code: ErrorCode.INTERNAL_ERROR,
         message: "An unexpected error occurred",
+        requestId: c.get("requestId"),
       },
     },
     500,

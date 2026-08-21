@@ -8,7 +8,13 @@ import type { AppEnv } from "../types/env.js";
  */
 export const requestIdMiddleware = () =>
   createMiddleware<AppEnv>(async (c, next) => {
-    const id = (c.req.header("X-Request-Id") ?? crypto.randomUUID()) as RequestId;
+    const suppliedId = c.req.header("X-Request-Id")?.trim();
+    // Never reflect arbitrary or unbounded request headers into logs/responses.
+    const id = (
+      suppliedId && /^[A-Za-z0-9_-]{8,128}$/.test(suppliedId)
+        ? suppliedId
+        : crypto.randomUUID()
+    ) as RequestId;
     c.set("requestId", id);
     c.header("X-Request-Id", id);
     await next();
