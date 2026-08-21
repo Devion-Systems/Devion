@@ -9,7 +9,6 @@ import {
   Share2,
   UserCog,
   ShieldCheck,
-  CreditCard,
   ScrollText,
   Settings,
   Building2,
@@ -90,12 +89,6 @@ export function getOrgNavGroups(orgSlug: string): NavGroup[] {
           href: `${base}/roles`,
           icon: ShieldCheck,
           permission: 'team:invite',
-        },
-        {
-          label: 'Abrechnung',
-          href: `${base}/billing`,
-          icon: CreditCard,
-          permission: 'org:billing',
         },
         {
           label: 'Audit Log',

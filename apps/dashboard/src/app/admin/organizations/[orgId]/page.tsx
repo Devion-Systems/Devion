@@ -1,15 +1,8 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminOrganizationsDetailPage({ params }: { params: { orgId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Org-Detail (Admin)"
-        description="Support-Sicht auf eine einzelne Organisation"
-      />
-      {/* TODO: Support-Sicht auf eine einzelne Organisation */}
-    </div>
-  )
-}
+"use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
+import { PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
+type Org = { id: string; name: string; slug: string; memberCount: number; teamCount: number; projectCount: number };
+export default function AdminOrganizationsDetailPage() { const { orgId } = useParams<{ orgId: string }>(); const router = useRouter(); const client = useQueryClient(); const { data } = useQuery<Org>({ queryKey: ["admin", "organization", orgId], queryFn: async () => { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/organizations/${orgId}`, { credentials: "include" }); if (!response.ok) throw new Error("Organisation nicht gefunden."); return response.json(); } }); const [name, setName] = useState(""); const [slug, setSlug] = useState(""); const [message, setMessage] = useState<string | null>(null); const currentName = name || data?.name || ""; const currentSlug = slug || data?.slug || ""; async function save() { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/organizations/${orgId}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: currentName, slug: currentSlug }) }); setMessage(response.ok ? "Organisation gespeichert." : "Änderung konnte nicht gespeichert werden."); if (response.ok) void client.invalidateQueries({ queryKey: ["admin", "organization", orgId] }); } async function remove() { if (!data || !confirm(`Organisation ${data.name} samt Ressourcen löschen?`)) return; const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/organizations/${orgId}`, { method: "DELETE", credentials: "include" }); if (response.ok) router.replace("/admin/organizations"); else setMessage("Organisation konnte nicht gelöscht werden."); } return <div className="space-y-6 p-5 sm:p-7"><PageHeader title={data?.name ?? "Organisation"} description="Plattformweite Organisationsverwaltung." /><div className="grid gap-4 lg:grid-cols-3"><section className="space-y-4 rounded-2xl border border-white/[0.07] bg-[#172128] p-5 lg:col-span-2"><label className="block text-sm text-zinc-300">Name<input className="mt-2 h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3" value={currentName} onChange={(event) => setName(event.target.value)} /></label><label className="block text-sm text-zinc-300">Slug<input className="mt-2 h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3" value={currentSlug} onChange={(event) => setSlug(event.target.value.toLowerCase())} /></label><Button onClick={save}>Speichern</Button>{message ? <p className="text-sm text-zinc-400">{message}</p> : null}</section><aside className="rounded-2xl border border-white/[0.07] bg-[#172128] p-5 text-sm text-zinc-400"><p>{data?.memberCount ?? 0} Mitglieder</p><p className="mt-2">{data?.teamCount ?? 0} Teams</p><p className="mt-2">{data?.projectCount ?? 0} Projekte</p><Button className="mt-6 w-full" variant="destructive" onClick={remove}>Organisation löschen</Button></aside></div></div>; }

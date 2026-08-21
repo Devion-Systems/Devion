@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/env.js";
 import { aiGatewayRoutes } from "./ai-gateway.routes.js";
+import { adminOrganizationRoutes } from "./admin-organizations.routes.js";
 import { analyticsRoutes } from "./analytics.routes.js";
 import { authRoutes } from "./auth.routes.js";
 import { dashboardTlsRoutes } from "./dashboard-tls.routes.js";
@@ -9,6 +10,7 @@ import { healthRoutes } from "./health.routes.js";
 import { managedDatabaseRoutes } from "./managed-databases.routes.js";
 import { projectRoutes } from "./projects.routes.js";
 import { systemUpdateRoutes } from "./system-updates.routes.js";
+import { teamRoutes } from "./teams.routes.js";
 import { vmRoutes } from "./vms.routes.js";
 
 /**
@@ -32,11 +34,13 @@ routes.route("/api/vms", vmRoutes);
 // Multi-provider text generation (OpenAI, Anthropic, local and compatible APIs)
 routes.route("/api/ai", aiGatewayRoutes);
 routes.route("/api/admin/analytics", analyticsRoutes);
+routes.route("/api/admin/organizations", adminOrganizationRoutes);
 routes.route("/api/admin/tls", dashboardTlsRoutes);
 routes.route("/api/admin/system-updates", systemUpdateRoutes);
 
 // Organization-scoped application resources
 routes.route("/organizations", projectRoutes);
 routes.route("/organizations", managedDatabaseRoutes);
+routes.route("/organizations", teamRoutes);
 
 export { routes };

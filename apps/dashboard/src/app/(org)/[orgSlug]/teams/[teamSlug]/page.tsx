@@ -1,15 +1,7 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function TeamsDetailPage({ params }: { params: { orgSlug: string, teamSlug: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Team-Übersicht"
-        description="Mitglieder-Preview, Projekt-Preview"
-      />
-      {/* TODO: Mitglieder-Preview, Projekt-Preview */}
-    </div>
-  )
-}
+"use client";
+import { useQuery } from "@tanstack/react-query";
+import { FolderKanban, Users } from "lucide-react";
+import { useParams } from "next/navigation";
+import { PageHeader } from "@/components/layout/page-header";
+type Detail = { name: string; members: { userId: string; name: string; email: string }[]; projects: { id: string; name: string; slug: string; status: string }[] };
+export default function TeamsDetailPage() { const { orgSlug, teamSlug } = useParams<{ orgSlug: string; teamSlug: string }>(); const { data, isLoading } = useQuery<Detail>({ queryKey: ["org", orgSlug, "team", teamSlug], queryFn: async () => { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/organizations/${orgSlug}/teams/${teamSlug}`, { credentials: "include" }); if (!response.ok) throw new Error("Team konnte nicht geladen werden."); return response.json(); } }); return <div className="space-y-6 p-5 sm:p-7"><PageHeader title={data?.name ?? "Team"} description="Mitglieder und zugewiesene Projekte dieses Teams." />{isLoading ? <p className="text-sm text-zinc-500">Team wird geladen …</p> : <div className="grid gap-4 lg:grid-cols-2"><section className="rounded-2xl border border-white/[0.07] bg-[#172128] p-5"><h2 className="flex items-center gap-2 font-semibold text-zinc-100"><Users className="size-4 text-[#81ecec]" /> Mitglieder</h2><div className="mt-4 space-y-3">{data?.members.map((item) => <div key={item.userId}><p className="text-sm text-zinc-200">{item.name}</p><p className="text-xs text-zinc-500">{item.email}</p></div>)}{!data?.members.length ? <p className="text-sm text-zinc-500">Keine Mitglieder.</p> : null}</div></section><section className="rounded-2xl border border-white/[0.07] bg-[#172128] p-5"><h2 className="flex items-center gap-2 font-semibold text-zinc-100"><FolderKanban className="size-4 text-[#81ecec]" /> Projekte</h2><div className="mt-4 space-y-3">{data?.projects.map((item) => <div key={item.id}><p className="text-sm text-zinc-200">{item.name}</p><p className="text-xs text-zinc-500">{item.slug} · {item.status}</p></div>)}{!data?.projects.length ? <p className="text-sm text-zinc-500">Keine Projekte zugewiesen.</p> : null}</div></section></div>}</div>; }
