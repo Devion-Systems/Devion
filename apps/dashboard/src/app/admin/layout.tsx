@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Search, ShieldCheck } from "lucide-react";
+import { Search, ShieldCheck } from "lucide-react";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { Sidebar } from "@/components/layout/sidebar";
 
@@ -28,13 +28,6 @@ export default function AdminLayout({
             >
               <Search className="h-3.5 w-3.5" />
               Suchen
-            </button>
-            <button
-              type="button"
-              aria-label="Benachrichtigungen"
-              className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-200"
-            >
-              <Bell className="h-4 w-4" />
             </button>
           </div>
         </header>

@@ -31,6 +31,11 @@ set_env_value() {
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
 }
+ensure_env_value() {
+  local key="$1"
+  local value="$2"
+  grep -q "^${key}=" "$ENV_FILE" || printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+}
 
 install_base_packages() {
   case "$1" in
@@ -155,6 +160,12 @@ else
   fi
   info "Vorherige Konfiguration gesichert: $backup_file"
 fi
+
+# Compose warns for unset interpolation variables even when an empty value is
+# intentional. Keep existing administrator values intact and add only missing
+# defaults for fresh or older installations.
+ensure_env_value "BETTER_AUTH_COOKIE_DOMAIN" ""
+ensure_env_value "TRAEFIK_CNAME_TARGET" ""
 
 info "Bereite Traefik-Verzeichnisse vor"
 install -d -m 700 "$INSTALL_DIR/data/traefik/dynamic" "$INSTALL_DIR/data/traefik/certs" "$INSTALL_DIR/data/traefik/acme"

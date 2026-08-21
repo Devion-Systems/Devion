@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { MobileNav } from "@/components/layout/mobile-nav";
@@ -75,13 +75,6 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
                 <kbd className="ml-5 rounded border border-white/[0.08] px-1.5 py-0.5 font-mono text-[10px] text-zinc-600">
                   ⌘ K
                 </kbd>
-              </button>
-              <button
-                type="button"
-                aria-label="Benachrichtigungen"
-                className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-200"
-              >
-                <Bell className="h-4 w-4" />
               </button>
               <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-[#0984e3] to-[#00cec9] text-[11px] font-bold text-[#0b1217]">
                 D

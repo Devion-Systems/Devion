@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, KeyRound, Laptop, LockKeyhole, UserRound } from "lucide-react";
+import { KeyRound, Laptop, LockKeyhole, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -10,7 +10,6 @@ const accountNavigation = [
   { href: "/account/security", label: "Sicherheit", icon: LockKeyhole },
   { href: "/account/sessions", label: "Sitzungen", icon: Laptop },
   { href: "/account/api-keys", label: "API-Schlüssel", icon: KeyRound },
-  { href: "/account/notifications", label: "Benachrichtigungen", icon: Bell },
 ];
 
 export default function AccountLayout({
@@ -33,13 +32,6 @@ export default function AccountLayout({
             </span>
             Devion <span className="font-normal text-zinc-500">/ Account</span>
           </Link>
-          <button
-            type="button"
-            aria-label="Benachrichtigungen"
-            className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-200"
-          >
-            <Bell className="h-4 w-4" />
-          </button>
         </div>
       </header>
       <div className="mx-auto grid max-w-6xl gap-8 px-5 py-8 sm:px-7 lg:grid-cols-[190px_minmax(0,1fr)]">

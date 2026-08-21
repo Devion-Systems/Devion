@@ -98,6 +98,29 @@ analyticsRoutes.get("/users", async (c) => {
   return c.json(users);
 });
 
+analyticsRoutes.get("/audit-logs", async (c) => {
+  const requestedLimit = Number(c.req.query("limit") ?? "100");
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 250) : 100;
+  const entries = await db
+    .select({
+      id: auditLogs.id,
+      action: auditLogs.action,
+      targetType: auditLogs.targetType,
+      targetId: auditLogs.targetId,
+      metadata: auditLogs.metadata,
+      ipAddress: auditLogs.ipAddress,
+      createdAt: auditLogs.createdAt,
+      actorId: auditLogs.actorId,
+      actorName: user.name,
+      actorEmail: user.email,
+    })
+    .from(auditLogs)
+    .leftJoin(user, eq(auditLogs.actorId, user.id))
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(limit);
+  return c.json(entries);
+});
+
 analyticsRoutes.get("/users/:userId", async (c) => {
   const userId = c.req.param("userId");
   const account = await db.query.user.findFirst({ where: eq(user.id, userId) });

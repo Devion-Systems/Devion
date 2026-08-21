@@ -1,11 +1,11 @@
 import {
-  AppWindow, Bot, Boxes, Building2, Database, FolderKanban, Gamepad2, Gauge, HardDrive,
-  LayoutDashboard, Network, Radio, RefreshCw, ScrollText, Server, Settings,
-  Share2, ShieldCheck, UserCog, Users, Wrench,
+  AppWindow, Building2, Database, FolderKanban, Gamepad2, Gauge, HardDrive,
+  LayoutDashboard, RefreshCw, ScrollText, Server, Settings,
+  Share2, ShieldCheck, UserCog, Users,
 } from "lucide-react";
 import type { Permission } from "@/features/permissions/constants";
 
-export type NavItem = { label: string; href: string; icon: React.ElementType; permission?: Permission; planned?: boolean };
+export type NavItem = { label: string; href: string; icon: React.ElementType; permission?: Permission };
 export type NavGroup = { title: string; icon: React.ElementType; items: NavItem[]; defaultOpen?: boolean };
 
 export function getOrgNavGroups(orgSlug: string): NavGroup[] {
@@ -15,17 +15,12 @@ export function getOrgNavGroups(orgSlug: string): NavGroup[] {
     { title: "Projekte", icon: FolderKanban, defaultOpen: true, items: [{ label: "Alle Projekte", href: `${base}/projects`, icon: FolderKanban }] },
     { title: "Workloads", icon: AppWindow, items: [
       { label: "Anwendungen", href: `${base}/applications`, icon: AppWindow },
-      { label: "Deployments", href: `${base}/deployments`, icon: Boxes, planned: true },
-      { label: "Builds", href: `${base}/builds`, icon: Wrench, planned: true },
       { label: "Game Server", href: `${base}/game-servers`, icon: Gamepad2 },
     ] },
     { title: "Infrastruktur", icon: Server, defaultOpen: true, items: [
       { label: "Hardware", href: `${base}/hardware`, icon: Server },
       { label: "Datenbanken", href: `${base}/databases`, icon: Database },
       { label: "Storage", href: `${base}/resources/shared`, icon: HardDrive },
-      { label: "Networking", href: `${base}/networking`, icon: Network, planned: true },
-      { label: "AI", href: `${base}/ai`, icon: Bot, planned: true },
-      { label: "Observability", href: `${base}/observability`, icon: Radio, planned: true },
       { label: "Ressourcen-Limits", href: `${base}/resources/limits`, icon: Gauge, permission: "hardware:manage" },
       { label: "Shared Resources", href: `${base}/resources/shared`, icon: Share2, permission: "hardware:manage" },
     ] },

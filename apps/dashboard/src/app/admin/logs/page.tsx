@@ -1,15 +1,15 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { useQuery } from "@tanstack/react-query";
+import { History, RefreshCw, ShieldCheck } from "lucide-react";
+import { PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
+
+type AuditEntry = { id: string; action: string; targetType: string; targetId: string | null; metadata: string | null; ipAddress: string | null; createdAt: string; actorId: string | null; actorName: string | null; actorEmail: string | null };
+
+function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Unbekannt" : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "medium" }).format(date); }
 
 export default function AdminLogsPage() {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Audit Log (Plattform)"
-        description="Plattformweiter Audit-Log, nicht org-gebunden"
-      />
-      {/* TODO: Plattformweiter Audit-Log, nicht org-gebunden */}
-    </div>
-  )
+  const logs = useQuery<AuditEntry[]>({ queryKey: ["admin", "audit-logs"], queryFn: async () => { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/analytics/audit-logs`, { credentials: "include" }); if (!response.ok) throw new Error("Audit-Logs konnten nicht geladen werden."); return response.json(); }, refetchInterval: 30_000 });
+  return <div className="space-y-6 p-5 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Audit-Log" description="Nachvollziehbare, plattformweite Änderungen und sicherheitsrelevante Aktionen." /><Button variant="outline" size="sm" onClick={() => void logs.refetch()} disabled={logs.isFetching}><RefreshCw className={logs.isFetching ? "animate-spin" : ""} />Aktualisieren</Button></div>{logs.isError ? <div className="rounded-xl border border-red-400/25 bg-red-400/10 p-4 text-sm text-red-100">{logs.error.message}</div> : null}<section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#172128]/90"><div className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-4"><ShieldCheck className="size-4 text-[#81ecec]" /><div><h2 className="text-sm font-semibold text-zinc-100">Letzte Aktionen</h2><p className="mt-0.5 text-xs text-zinc-500">Aktualisiert automatisch alle 30 Sekunden</p></div></div>{logs.isLoading ? <div className="space-y-3 p-5">{[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-xl bg-white/[0.04]" />)}</div> : null}<div className="divide-y divide-white/[0.05]">{logs.data?.map((entry) => <article key={entry.id} className="flex gap-3 px-5 py-4"><span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-[#00cec9]/15 bg-[#00cec9]/[0.06]"><History className="size-3.5 text-[#81ecec]" /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-2 gap-y-1"><p className="font-mono text-sm text-zinc-200">{entry.action}</p><span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] text-zinc-500">{entry.targetType}</span></div><p className="mt-1 text-xs text-zinc-500">{entry.actorName ?? "System"}{entry.actorEmail ? ` · ${entry.actorEmail}` : ""}{entry.ipAddress ? ` · ${entry.ipAddress}` : ""}</p>{entry.metadata ? <p className="mt-1 max-w-3xl truncate font-mono text-[11px] text-zinc-600">{entry.metadata}</p> : null}</div><time className="shrink-0 text-right text-[11px] text-zinc-600">{formatDate(entry.createdAt)}</time></article>)}{!logs.isLoading && !logs.data?.length ? <div className="px-5 py-12 text-center text-sm text-zinc-500">Noch keine Audit-Einträge vorhanden.</div> : null}</div></section></div>;
 }
