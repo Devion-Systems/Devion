@@ -1,0 +1,1 @@
+CREATE TABLE "personal_files" ("id" text PRIMARY KEY NOT NULL, "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE cascade, "file_name" text NOT NULL, "file_type" text NOT NULL, "file_size" integer NOT NULL, "storage_path" text NOT NULL, "created_at" timestamp DEFAULT now() NOT NULL);
