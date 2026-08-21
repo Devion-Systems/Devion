@@ -28,7 +28,40 @@ set_env_value() {
   fi
 }
 
+install_base_packages() {
+  case "$1" in
+    apt) apt-get update -y; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git openssl gnupg lsb-release ;;
+    dnf) dnf install -y ca-certificates curl git openssl gnupg2 ;;
+    *) fail "Unsupported package manager: $1" ;;
+  esac
+}
+install_docker() {
+  local manager="$1" distribution="$2" codename="${3:-}"
+  info "Installiere Docker Engine, Buildx und Docker Compose Plugin"
+  case "$manager" in
+    apt) install -d -m 0755 /etc/apt/keyrings; curl -fsSL "https://download.docker.com/linux/$distribution/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; chmod a+r /etc/apt/keyrings/docker.gpg; printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/%s %s stable\n' "$(dpkg --print-architecture)" "$distribution" "$codename" > /etc/apt/sources.list.d/docker.list; apt-get update -y; DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ;;
+    dnf) dnf install -y dnf-plugins-core; dnf config-manager --add-repo "https://download.docker.com/linux/$distribution/docker-ce.repo"; dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ;;
+  esac
+}
+prepare_host() {
+  [[ -r /etc/os-release ]] || fail "Nur Linux-Systeme mit /etc/os-release werden unterstützt."
+  . /etc/os-release
+  local manager distribution codename
+  case "${ID:-}" in
+    ubuntu|debian) manager=apt; distribution="$ID"; codename="${VERSION_CODENAME:-}" ;;
+    fedora) manager=dnf; distribution=fedora; codename="" ;;
+    rhel|centos|rocky|almalinux) manager=dnf; distribution=centos; codename="" ;;
+    *) fail "Nicht unterstütztes Linux: ${PRETTY_NAME:-$ID}" ;;
+  esac
+  info "Installiere und prüfe Systemabhängigkeiten"
+  install_base_packages "$manager"
+  if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then install_docker "$manager" "$distribution" "$codename"; fi
+  command -v systemctl >/dev/null && systemctl enable --now docker
+  docker info >/dev/null 2>&1 || fail "Docker konnte nicht gestartet werden. Prüfe: systemctl status docker"
+}
+
 [[ "${EUID}" -eq 0 ]] || fail "Bitte mit sudo ausführen: curl ... | sudo bash"
+prepare_host
 command -v git >/dev/null || fail "git muss installiert sein."
 command -v docker >/dev/null || fail "Docker Engine muss installiert sein."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 muss installiert sein."
