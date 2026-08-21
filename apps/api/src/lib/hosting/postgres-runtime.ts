@@ -13,6 +13,7 @@ export type DatabasePlan = keyof typeof databasePlans;
 
 type DockerContainer = {
   State?: { Running?: boolean; Status?: string; Health?: { Status?: string } };
+  Config?: { Env?: string[] };
 };
 
 function dockerRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -45,9 +46,8 @@ function dockerRequest<T>(method: string, path: string, body?: unknown): Promise
           try {
             resolve(JSON.parse(responseBody) as T);
           } catch {
-            // Image pulls are a JSON stream, not one JSON document. A 2xx
-            // response means Docker completed the pull successfully.
-            resolve(undefined as T);
+            // Image pulls and TTY-enabled exec sessions return plain text.
+            resolve(responseBody as T);
           }
         });
       },
@@ -141,5 +141,46 @@ export class PostgresRuntime {
       "DELETE",
       `/volumes/${encodeURIComponent(`${containerName}-data`)}?force=true`,
     );
+  }
+
+  async query(containerName: string, databaseName: string, username: string, sql: string) {
+    const container = await dockerRequest<DockerContainer>(
+      "GET",
+      `/containers/${encodeURIComponent(containerName)}/json`,
+    );
+    const password = container.Config?.Env?.find((item) => item.startsWith("POSTGRES_PASSWORD="))?.slice(
+      "POSTGRES_PASSWORD=".length,
+    );
+    if (!password) throw new Error("Managed database credentials are unavailable");
+
+    const exec = await dockerRequest<{ Id: string }>(
+      "POST",
+      `/containers/${encodeURIComponent(containerName)}/exec`,
+      {
+        AttachStdout: true,
+        AttachStderr: true,
+        Tty: true,
+        Env: [`PGPASSWORD=${password}`],
+        Cmd: [
+          "psql",
+          "-X",
+          "-qAt",
+          "-v",
+          "ON_ERROR_STOP=1",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          username,
+          "-d",
+          databaseName,
+          "-c",
+          sql,
+        ],
+      },
+    );
+    return dockerRequest<string>("POST", `/exec/${encodeURIComponent(exec.Id)}/start`, {
+      Detach: false,
+      Tty: true,
+    });
   }
 }

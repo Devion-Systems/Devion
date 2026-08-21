@@ -79,6 +79,7 @@ services:
       TRAEFIK_PROJECT_UPSTREAM_TEMPLATE: ${TRAEFIK_PROJECT_UPSTREAM_TEMPLATE}
       TRAEFIK_CNAME_TARGET: ${TRAEFIK_CNAME_TARGET}
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - ../../data/traefik/dynamic:/data/traefik/dynamic
       - ../../data/traefik/certs:/data/traefik/certs
       # Managed PostgreSQL instances are created through the local Docker API.

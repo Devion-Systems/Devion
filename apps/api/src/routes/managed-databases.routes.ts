@@ -24,6 +24,21 @@ const input = z.object({
 const routes = new Hono<AppEnv>();
 const postgresRuntime = new PostgresRuntime();
 routes.use("/*", requireAuthenticatedUser);
+const deleteInput = z.object({ confirmationName: z.string().trim().min(1).max(63) });
+const tableInput = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
+
+function quoteIdentifier(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function quoteLiteral(value: string) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function canManageDatabases(role: string) {
+  return role === "owner" || role === "admin";
+}
+
 async function access(request: Request, slug: string) {
   const current = await auth.api.getSession({ headers: request.headers });
   if (!current) return null;
@@ -32,7 +47,22 @@ async function access(request: Request, slug: string) {
   const membership = await db.query.member.findFirst({
     where: and(eq(member.organizationId, org.id), eq(member.userId, current.user.id)),
   });
-  return membership ? { org, userId: current.user.id } : null;
+  return membership ? { org, userId: current.user.id, role: membership.role } : null;
+}
+
+async function databaseInScope(orgId: string, databaseId: string) {
+  return db.query.managedDatabases.findFirst({
+    where: and(eq(managedDatabases.id, databaseId), eq(managedDatabases.organizationId, orgId)),
+  });
+}
+
+async function requireReadyDatabase(orgId: string, databaseId: string) {
+  const database = await databaseInScope(orgId, databaseId);
+  if (!database) return { error: "Database not found" as const };
+  if ((await postgresRuntime.status(database.containerName)) !== "ready") {
+    return { error: "Database is not ready" as const };
+  }
+  return { database };
 }
 routes.get("/:orgSlug/databases", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
@@ -115,12 +145,7 @@ routes.post("/:orgSlug/databases", async (c) => {
 routes.get("/:orgSlug/databases/:databaseId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  const database = await db.query.managedDatabases.findFirst({
-    where: and(
-      eq(managedDatabases.id, c.req.param("databaseId")),
-      eq(managedDatabases.organizationId, scope.org.id),
-    ),
-  });
+  const database = await databaseInScope(scope.org.id, c.req.param("databaseId"));
   if (!database) return c.json({ error: "Database not found" }, 404);
   return c.json({ ...database, status: await postgresRuntime.status(database.containerName) });
 });
@@ -157,13 +182,14 @@ routes.patch("/:orgSlug/databases/:databaseId", async (c) => {
 routes.delete("/:orgSlug/databases/:databaseId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  const database = await db.query.managedDatabases.findFirst({
-    where: and(
-      eq(managedDatabases.id, c.req.param("databaseId")),
-      eq(managedDatabases.organizationId, scope.org.id),
-    ),
-  });
+  if (!canManageDatabases(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  const confirmation = deleteInput.safeParse(await c.req.json());
+  if (!confirmation.success) return c.json({ error: "Database name confirmation is required" }, 400);
+  const database = await databaseInScope(scope.org.id, c.req.param("databaseId"));
   if (!database) return c.json({ error: "Database not found" }, 404);
+  if (confirmation.data.confirmationName !== database.name) {
+    return c.json({ error: "Database name confirmation does not match" }, 400);
+  }
   try {
     await postgresRuntime.remove(database.containerName);
   } catch (error) {
@@ -172,6 +198,74 @@ routes.delete("/:orgSlug/databases/:databaseId", async (c) => {
   }
   await db.delete(managedDatabases).where(eq(managedDatabases.id, database.id));
   return c.body(null, 204);
+});
+routes.get("/:orgSlug/databases/:databaseId/console/tables", async (c) => {
+  const scope = await access(c.req.raw, c.req.param("orgSlug"));
+  if (!scope) return c.json({ error: "Not found" }, 404);
+  const result = await requireReadyDatabase(scope.org.id, c.req.param("databaseId"));
+  if ("error" in result) return c.json({ error: result.error }, result.error === "Database not found" ? 404 : 409);
+  try {
+    const output = await postgresRuntime.query(
+      result.database.containerName,
+      result.database.databaseName,
+      result.database.username,
+      "SELECT table_schema || E'\\t' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name",
+    );
+    const tables = output
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [schema, name] = line.split("\t");
+        return { schema, name };
+      });
+    return c.json({ tables });
+  } catch (error) {
+    c.get("logger").error({ error, databaseId: result.database.id }, "Database console table list failed");
+    return c.json({ error: "Unable to inspect database tables" }, 503);
+  }
+});
+routes.get("/:orgSlug/databases/:databaseId/console/tables/:schema/:tableName", async (c) => {
+  const scope = await access(c.req.raw, c.req.param("orgSlug"));
+  if (!scope) return c.json({ error: "Not found" }, 404);
+  const parsed = tableInput.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: "Invalid row limit" }, 400);
+  const result = await requireReadyDatabase(scope.org.id, c.req.param("databaseId"));
+  if ("error" in result) return c.json({ error: result.error }, result.error === "Database not found" ? 404 : 409);
+  const schema = c.req.param("schema");
+  const tableName = c.req.param("tableName");
+  try {
+    const existsOutput = await postgresRuntime.query(
+      result.database.containerName,
+      result.database.databaseName,
+      result.database.username,
+      `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema = ${quoteLiteral(schema)} AND table_name = ${quoteLiteral(tableName)})`,
+    );
+    if (existsOutput.trim() !== "t") return c.json({ error: "Table not found" }, 404);
+    const qualifiedTable = `${quoteIdentifier(schema)}.${quoteIdentifier(tableName)}`;
+    const columnsOutput = await postgresRuntime.query(
+      result.database.containerName,
+      result.database.databaseName,
+      result.database.username,
+      `SELECT column_name FROM information_schema.columns WHERE table_schema = ${quoteLiteral(schema)} AND table_name = ${quoteLiteral(tableName)} ORDER BY ordinal_position`,
+    );
+    const rowsOutput = await postgresRuntime.query(
+      result.database.containerName,
+      result.database.databaseName,
+      result.database.username,
+      `SELECT COALESCE(json_agg(row_data), '[]'::json)::text FROM (SELECT to_jsonb(item) AS row_data FROM ${qualifiedTable} AS item LIMIT ${parsed.data.limit}) AS rows`,
+    );
+    return c.json({
+      schema,
+      table: tableName,
+      columns: columnsOutput.trim().split("\n").filter(Boolean),
+      rows: JSON.parse(rowsOutput.trim() || "[]"),
+      limit: parsed.data.limit,
+    });
+  } catch (error) {
+    c.get("logger").error({ error, databaseId: result.database.id, schema, tableName }, "Database console query failed");
+    return c.json({ error: "Unable to inspect database table" }, 503);
+  }
 });
 routes.get("/:orgSlug/resources", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
