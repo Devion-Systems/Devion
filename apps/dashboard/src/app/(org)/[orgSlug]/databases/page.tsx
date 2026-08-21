@@ -43,7 +43,7 @@ export default function DatabasesPage() {
 
   return (
     <div className="space-y-6 p-5 sm:p-7">
-      <PageHeader title="Datenbanken" description="PostgreSQL-Datenbanken innerhalb dieser Organisation verwalten." />
+      <PageHeader title="Datenbanken" description="PostgreSQL, MySQL und Redis innerhalb dieser Organisation verwalten." />
       <div className="flex justify-end"><Button onClick={() => router.push(`/${orgSlug}/databases/new`)}><Plus /> Datenbank erstellen</Button></div>
       {isLoading ? <p className="text-sm text-zinc-500">Datenbanken werden geladen …</p> : null}
       {message ? <p className="text-sm text-red-300">{message}</p> : null}

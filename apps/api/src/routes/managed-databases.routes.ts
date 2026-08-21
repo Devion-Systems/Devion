@@ -3,7 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
-import { databasePlans, postgresVersions, PostgresRuntime } from "../lib/hosting/postgres-runtime.js";
+import { databasePlans, mysqlVersions, postgresVersions, PostgresRuntime, redisVersions } from "../lib/hosting/postgres-runtime.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import type { AppEnv } from "../types/env.js";
 
@@ -12,15 +12,24 @@ const input = z.object({
     .string()
     .trim()
     .regex(/^[a-z][a-z0-9-]{1,62}$/),
-  engine: z.literal("postgresql"),
-  version: z.enum(postgresVersions),
+  engine: z.enum(["postgresql", "mysql", "redis"]),
+  version: z.string().trim().max(10),
   databaseName: z.string().trim().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
   username: z.string().trim().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
   password: z.string().min(12).max(128).optional(),
   region: z.string().max(80).default("local"),
   maintenanceWindow: z.string().max(120).optional(),
+}).superRefine((value, context) => {
+  const allowedVersions = value.engine === "postgresql" ? postgresVersions : value.engine === "mysql" ? mysqlVersions : redisVersions;
+  if (!allowedVersions.includes(value.version as never)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["version"], message: "Unsupported database version" });
 });
-const updateInput = input.pick({ name: true, engine: true, version: true, region: true, maintenanceWindow: true });
+const updateInput = z.object({
+  name: z.string().trim().regex(/^[a-z][a-z0-9-]{1,62}$/).optional(),
+  engine: z.enum(["postgresql", "mysql", "redis"]).optional(),
+  version: z.string().trim().max(10).optional(),
+  region: z.string().max(80).optional(),
+  maintenanceWindow: z.string().max(120).optional(),
+});
 const DEFAULT_DATABASE_PLAN = "starter" as const;
 const routes = new Hono<AppEnv>();
 const postgresRuntime = new PostgresRuntime();
@@ -38,6 +47,16 @@ function quoteLiteral(value: string) {
 
 function canManageDatabases(role: string) {
   return role === "owner" || role === "admin";
+}
+
+function connectionFor(database: { engine: "postgresql" | "mysql" | "redis"; containerName: string; databaseName: string; username: string }, password: string) {
+  const host = database.containerName;
+  if (database.engine === "redis") {
+    return { host, port: 6379, database: "0", username: "default", password, url: `redis://:${encodeURIComponent(password)}@${host}:6379/0` };
+  }
+  const port = database.engine === "mysql" ? 3306 : 5432;
+  const scheme = database.engine === "mysql" ? "mysql" : "postgresql";
+  return { host, port, database: database.databaseName, username: database.username, password, url: `${scheme}://${encodeURIComponent(database.username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database.databaseName)}` };
 }
 
 async function access(request: Request, slug: string) {
@@ -118,6 +137,7 @@ routes.post("/:orgSlug/databases", async (c) => {
   }
   try {
     await postgresRuntime.provision({
+      engine: parsed.data.engine,
       containerName,
       databaseName,
       username,
@@ -131,14 +151,7 @@ routes.post("/:orgSlug/databases", async (c) => {
       {
         id,
         status,
-        connection: {
-          host: containerName,
-          port: 5432,
-          database: databaseName,
-          username,
-          password: generatedPassword,
-          url: `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(generatedPassword)}@${containerName}:5432/${encodeURIComponent(databaseName)}`,
-        },
+        connection: connectionFor({ engine: parsed.data.engine, containerName, databaseName, username }, generatedPassword),
       },
       201,
     );
@@ -170,6 +183,7 @@ routes.post("/:orgSlug/databases/:databaseId/retry", async (c) => {
   try {
     await postgresRuntime.removeIfPresent(database.containerName);
     await postgresRuntime.provision({
+      engine: database.engine,
       containerName: database.containerName,
       databaseName: database.databaseName,
       username: database.username,
@@ -182,14 +196,7 @@ routes.post("/:orgSlug/databases/:databaseId/retry", async (c) => {
     return c.json({
       id: database.id,
       status,
-      connection: {
-        host: database.containerName,
-        port: 5432,
-        database: database.databaseName,
-        username: database.username,
-        password,
-        url: `postgresql://${encodeURIComponent(database.username)}:${encodeURIComponent(password)}@${database.containerName}:5432/${encodeURIComponent(database.databaseName)}`,
-      },
+      connection: connectionFor(database, password),
     });
   } catch (error) {
     await db.update(managedDatabases).set({ status: "failed" }).where(eq(managedDatabases.id, database.id));
@@ -250,6 +257,7 @@ routes.get("/:orgSlug/databases/:databaseId/console/tables", async (c) => {
   if (!scope) return c.json({ error: "Not found" }, 404);
   const result = await requireReadyDatabase(scope.org.id, c.req.param("databaseId"));
   if ("error" in result) return c.json({ error: result.error }, result.error === "Database not found" ? 404 : 409);
+  if (result.database.engine !== "postgresql") return c.json({ error: "The table console is currently available for PostgreSQL only" }, 409);
   try {
     const output = await postgresRuntime.query(
       result.database.containerName,
@@ -278,6 +286,7 @@ routes.get("/:orgSlug/databases/:databaseId/console/tables/:schema/:tableName", 
   if (!parsed.success) return c.json({ error: "Invalid row limit" }, 400);
   const result = await requireReadyDatabase(scope.org.id, c.req.param("databaseId"));
   if ("error" in result) return c.json({ error: result.error }, result.error === "Database not found" ? 404 : 409);
+  if (result.database.engine !== "postgresql") return c.json({ error: "The table console is currently available for PostgreSQL only" }, 409);
   const schema = c.req.param("schema");
   const tableName = c.req.param("tableName");
   try {

@@ -10,6 +10,9 @@ export const databasePlans = {
 } as const;
 
 export const postgresVersions = ["17", "16", "15", "14"] as const;
+export const mysqlVersions = ["8.4", "8.0"] as const;
+export const redisVersions = ["7", "6"] as const;
+export type ManagedDatabaseEngine = "postgresql" | "mysql" | "redis";
 
 export type DatabasePlan = keyof typeof databasePlans;
 
@@ -71,6 +74,7 @@ function resourceLimits(plan: DatabasePlan) {
 
 export class PostgresRuntime {
   async provision(input: {
+    engine: ManagedDatabaseEngine;
     containerName: string;
     databaseName: string;
     username: string;
@@ -79,9 +83,38 @@ export class PostgresRuntime {
     plan: DatabasePlan;
   }) {
     const volumeName = `${input.containerName}-data`;
+    const configuration = {
+      postgresql: {
+        image: `postgres:${input.version}-alpine`,
+        env: [
+          `POSTGRES_DB=${input.databaseName}`,
+          `POSTGRES_USER=${input.username}`,
+          `POSTGRES_PASSWORD=${input.password}`,
+        ],
+        dataPath: "/var/lib/postgresql/data",
+        healthcheck: ["CMD-SHELL", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
+      },
+      mysql: {
+        image: `mysql:${input.version}`,
+        env: [
+          `MYSQL_DATABASE=${input.databaseName}`,
+          `MYSQL_USER=${input.username}`,
+          `MYSQL_PASSWORD=${input.password}`,
+          `MYSQL_ROOT_PASSWORD=${input.password}`,
+        ],
+        dataPath: "/var/lib/mysql",
+        healthcheck: ["CMD-SHELL", 'mysqladmin ping -h 127.0.0.1 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD"'],
+      },
+      redis: {
+        image: `redis:${input.version}-alpine`,
+        env: [`REDIS_PASSWORD=${input.password}`],
+        dataPath: "/data",
+        healthcheck: ["CMD-SHELL", 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping'],
+      },
+    }[input.engine];
     await dockerRequest(
       "POST",
-      `/images/create?fromImage=${encodeURIComponent(`postgres:${input.version}-alpine`)}`,
+      `/images/create?fromImage=${encodeURIComponent(configuration.image)}`,
     );
     await dockerRequest("POST", "/volumes/create", {
       Name: volumeName,
@@ -91,15 +124,12 @@ export class PostgresRuntime {
       "POST",
       `/containers/create?name=${encodeURIComponent(input.containerName)}`,
       {
-        Image: `postgres:${input.version}-alpine`,
-        Env: [
-          `POSTGRES_DB=${input.databaseName}`,
-          `POSTGRES_USER=${input.username}`,
-          `POSTGRES_PASSWORD=${input.password}`,
-        ],
-        Labels: { "devion.managed": "true", "devion.kind": "postgresql" },
+        Image: configuration.image,
+        Env: configuration.env,
+        Cmd: input.engine === "redis" ? ["redis-server", "--appendonly", "yes", "--requirepass", input.password] : undefined,
+        Labels: { "devion.managed": "true", "devion.kind": input.engine },
         Healthcheck: {
-          Test: ["CMD-SHELL", `pg_isready -U ${input.username} -d ${input.databaseName}`],
+          Test: configuration.healthcheck,
           Interval: 10_000_000_000,
           Timeout: 3_000_000_000,
           Retries: 12,
@@ -107,7 +137,7 @@ export class PostgresRuntime {
         HostConfig: {
           ...resourceLimits(input.plan),
           RestartPolicy: { Name: "unless-stopped" },
-          Mounts: [{ Type: "volume", Source: volumeName, Target: "/var/lib/postgresql/data" }],
+          Mounts: [{ Type: "volume", Source: volumeName, Target: configuration.dataPath }],
         },
         NetworkingConfig: { EndpointsConfig: { [NETWORK]: {} } },
       },
