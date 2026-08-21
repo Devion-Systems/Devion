@@ -1,0 +1,1 @@
+CREATE TABLE "audit_logs" ("id" text PRIMARY KEY NOT NULL, "actor_id" text REFERENCES "user"("id") ON DELETE set null, "action" text NOT NULL, "target_type" text NOT NULL, "target_id" text, "metadata" text, "ip_address" text, "created_at" timestamp DEFAULT now() NOT NULL);

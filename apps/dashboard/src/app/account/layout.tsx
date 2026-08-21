@@ -1,17 +1,11 @@
 "use client";
 
-import { Bell, ClipboardList, FileText, KeyRound, Laptop, LifeBuoy, LockKeyhole, UserRound } from "lucide-react";
+import { Bell, KeyRound, Laptop, LockKeyhole, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const accountNavigation = [
-  { href: "/account", label: "Übersicht", icon: UserRound },
-  { href: "/account/activities", label: "Meine Aktivitäten", icon: ClipboardList },
-  { href: "/account/tasks", label: "Meine Aufgaben", icon: ClipboardList },
-  { href: "/account/files", label: "Dateien", icon: FileText },
-  { href: "/account/reports", label: "Reports", icon: FileText },
-  { href: "/account/support", label: "Hilfe & Support", icon: LifeBuoy },
   { href: "/account/profile", label: "Profil", icon: UserRound },
   { href: "/account/security", label: "Sicherheit", icon: LockKeyhole },
   { href: "/account/sessions", label: "Sitzungen", icon: Laptop },

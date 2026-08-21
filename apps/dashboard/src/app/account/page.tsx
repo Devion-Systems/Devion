@@ -1,25 +1,6 @@
 "use client";
-
-import { Activity, Bell, CheckCircle2, FolderKanban, Settings, UserRound } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { KeyRound, Laptop, LockKeyhole, UserRound } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
-import { useSession } from "@/features/auth/hooks/hooks";
-
-const cards = [
-  { label: "Aufgaben gesamt", value: "—", note: "Deine Vorgänge", icon: FolderKanban },
-  { label: "Benachrichtigungen", value: "—", note: "Wichtige Ereignisse", icon: Bell },
-  { label: "Offene Aufgaben", value: "—", note: "Noch zu erledigen", icon: Activity },
-  { label: "Profilstatus", value: "Aktiv", note: "Konto eingerichtet", icon: CheckCircle2 },
-];
-
-export default function AccountOverviewPage() {
-  const { data: session, isLoading } = useSession();
-  const { data: summary } = useQuery<{ tasks: number; openTasks: number; completedTasks: number; unreadNotifications: number }>({ queryKey: ["personal", "summary"], queryFn: async () => { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/personal/summary`, { credentials: "include" }); if (!response.ok) throw new Error("Übersicht konnte nicht geladen werden."); return response.json(); } });
-  const firstName = session?.user.name?.split(" ")[0] ?? "";
-  return <div className="space-y-6 py-1">
-    <PageHeader title={isLoading ? "Persönlicher Bereich" : `Willkommen${firstName ? `, ${firstName}` : ""}`} description="Deine Kontodaten, Sicherheit und persönlichen Einstellungen auf einen Blick." />
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map(({ label, value, note, icon: Icon }) => { const live = label === "Benachrichtigungen" ? summary?.unreadNotifications : label === "Aufgaben gesamt" ? summary?.tasks : label === "Offene Aufgaben" ? summary?.openTasks : value; return <div key={label} className="rounded-2xl border border-white/[0.07] bg-[#172128]/90 p-5"><div className="flex justify-between"><div><p className="text-xs uppercase tracking-wide text-zinc-500">{label}</p><p className="mt-2 text-2xl font-bold text-zinc-100">{live ?? "—"}</p><p className="mt-1 text-xs text-zinc-600">{note}</p></div><Icon className="size-4 text-[#81ecec]" /></div></div>; })}</section>
-    <section className="grid gap-4 lg:grid-cols-2"><div className="rounded-2xl border border-white/[0.07] bg-[#172128]/90 p-6"><h2 className="font-semibold text-zinc-100">Schnellaktionen</h2><div className="mt-4 grid gap-2 sm:grid-cols-2"><Link href="/account/profile" className="rounded-xl border border-white/[0.08] p-3 text-sm text-zinc-300 hover:border-[#00cec9]/40"><UserRound className="mb-2 size-4 text-[#81ecec]" />Profil bearbeiten</Link><Link href="/account/security" className="rounded-xl border border-white/[0.08] p-3 text-sm text-zinc-300 hover:border-[#00cec9]/40"><Settings className="mb-2 size-4 text-[#81ecec]" />Sicherheit prüfen</Link></div></div><div className="rounded-2xl border border-white/[0.07] bg-[#172128]/90 p-6"><h2 className="font-semibold text-zinc-100">Letzte Aktivität</h2><p className="mt-4 text-sm text-zinc-500">Persönliche Aktivitäten und Benachrichtigungen erscheinen hier, sobald die jeweiligen Dienste Daten liefern.</p></div></section>
-  </div>;
-}
+const sections = [{ href: "/account/profile", label: "Profil", description: "Name, Avatar und Kontodaten verwalten.", icon: UserRound }, { href: "/account/security", label: "Sicherheit", description: "Passwort und Zwei-Faktor-Authentifizierung schützen.", icon: LockKeyhole }, { href: "/account/sessions", label: "Sitzungen", description: "Aktive Geräte und Sitzungen prüfen.", icon: Laptop }, { href: "/account/api-keys", label: "API-Schlüssel", description: "Zugriffsschlüssel sicher verwalten.", icon: KeyRound }];
+export default function AccountPage() { return <div className="space-y-6 py-1"><PageHeader title="Account" description="Persönliche Kontoverwaltung und Sicherheit." /><div className="grid gap-4 sm:grid-cols-2">{sections.map(({ href, label, description, icon: Icon }) => <Link key={href} href={href} className="rounded-2xl border border-white/[0.07] bg-[#172128]/90 p-5 transition hover:border-[#00cec9]/40"><Icon className="size-5 text-[#81ecec]" /><h2 className="mt-4 font-semibold text-zinc-100">{label}</h2><p className="mt-1 text-sm text-zinc-500">{description}</p></Link>)}</div></div>; }
