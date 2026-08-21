@@ -51,6 +51,10 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
+    # Migrations are an explicit install/update step, never a long-running
+    # application dependency. `docker compose run --rm migrate` must finish
+    # successfully before a new control plane is started.
+    profiles: ["maintenance"]
     networks: [devion]
 
   api:
@@ -90,8 +94,6 @@ services:
       # They are labelled and restricted by the API; no database port is
       # published on the host.
     depends_on:
-      migrate:
-        condition: service_completed_successfully
       updater:
         condition: service_started
     healthcheck:

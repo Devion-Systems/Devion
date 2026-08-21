@@ -220,6 +220,30 @@ async function getAuthorizedProject(request: Request, orgSlug: string, projectId
   return project ? { ...access, project } : null;
 }
 
+/** Project metadata is available before a deployment runtime is connected. */
+projectRoutes.get("/:orgSlug/projects/:projectId", async (c) => {
+  const access = await getAuthorizedProject(
+    c.req.raw,
+    c.req.param("orgSlug"),
+    c.req.param("projectId"),
+  );
+  if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+
+  return c.json({
+    id: access.project.id,
+    name: access.project.name,
+    slug: access.project.slug,
+    description: access.project.description,
+    sourceType: access.project.sourceType,
+    gitUrl: access.project.gitUrl,
+    branch: access.project.branch,
+    status: access.project.status,
+    routingTargetUrl: access.project.routingTargetUrl,
+    createdAt: access.project.createdAt,
+    updatedAt: access.project.updatedAt,
+  });
+});
+
 projectRoutes.get("/:orgSlug/projects/:projectId/domains", async (c) => {
   const access = await getAuthorizedProject(
     c.req.raw,

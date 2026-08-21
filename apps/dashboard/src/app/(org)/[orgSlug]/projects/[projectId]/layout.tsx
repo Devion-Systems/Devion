@@ -18,15 +18,13 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type ProjectStatus = 'healthy' | 'failing' | 'degraded' | 'idle'
-
 type Project = {
   id: string
   name: string
-  status: ProjectStatus
+  status: 'healthy' | 'failing' | 'degraded' | 'idle'
 }
 
-const STATUS_DOT: Record<ProjectStatus, string> = {
+const STATUS_DOT: Record<Project['status'], string> = {
   healthy:  'bg-emerald-400',
   failing:  'bg-red-400',
   degraded: 'bg-amber-400',
@@ -44,7 +42,6 @@ function useProject(orgSlug: string, projectId: string) {
       if (!res.ok) throw new Error('Projekt nicht gefunden')
       return res.json()
     },
-    placeholderData: { id: projectId, name: projectId, status: 'healthy' },
   })
 }
 
@@ -80,7 +77,7 @@ export default function ProjectsDetailLayout({
       <div className="border-b border-white/[0.06] bg-[#11191f] px-6 pt-5">
         <div className="mb-4 flex items-center gap-3">
           {project && (
-            <span className={`h-2 w-2 rounded-full ${STATUS_DOT[project.status]}`} />
+            <span className={`h-2 w-2 rounded-full ${STATUS_DOT[project.status] ?? 'bg-zinc-600'}`} />
           )}
           <h1 className="text-lg font-semibold text-zinc-100">
             {project?.name ?? projectId}

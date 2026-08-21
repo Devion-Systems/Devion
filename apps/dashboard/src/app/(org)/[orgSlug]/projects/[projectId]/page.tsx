@@ -1,235 +1,50 @@
-'use client'
+"use client";
 
-import { useParams, useRouter } from 'next/navigation'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { PageHeader } from '@/components/layout/page-header'
-import { Button } from '@/components/ui/button'
-import {
-  Rocket,
-  RotateCcw,
-  GitBranch,
-  GitCommit,
-  Clock,
-  Globe,
-  CheckCircle2,
-  XCircle,
-  Activity,
-  ExternalLink,
-  AlertTriangle,
-} from 'lucide-react'
+import { useQuery } from "@tanstack/react-query";
+import { GitBranch, GitFork, Link2, Rocket } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { CapabilityNotice } from "@/components/layout/capability-notice";
+import { PageHeader } from "@/components/layout/page-header";
+import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
+import { Button } from "@/components/ui/button";
 
-type DeploymentStatus = 'success' | 'failed' | 'running' | 'pending'
+type Project = { id: string; name: string; slug: string; description: string | null; sourceType: "git" | "docker" | "blank"; gitUrl: string | null; branch: string; status: string; routingTargetUrl: string | null; createdAt: string; updatedAt: string };
 
-type ProjectOverview = {
-  id: string
-  name: string
-  description?: string
-  domain?: string
-  branch: string
-  lastCommit: string
-  lastCommitMsg: string
-  status: DeploymentStatus
-  deployedAt: string
-  buildDuration: string
-  uptime: string
-  recentDeployments: Array<{
-    id: string
-    status: DeploymentStatus
-    branch: string
-    commit: string
-    deployedAt: string
-    duration: string
-    triggeredBy: string
-  }>
-}
-
-const STATUS_MAP: Record<DeploymentStatus, { label: string; color: string; icon: React.ElementType }> = {
-  success: { label: 'Erfolgreich', color: 'text-emerald-400', icon: CheckCircle2 },
-  failed:  { label: 'Fehlgeschlagen', color: 'text-red-400', icon: XCircle },
-  running: { label: 'Läuft …', color: 'text-[#0984e3]', icon: Activity },
-  pending: { label: 'Ausstehend', color: 'text-zinc-400', icon: Clock },
-}
-
-function getExternalProjectUrl(domain?: string): string | null {
-  if (!domain || /[/?#@\s]/.test(domain)) return null
-
-  try {
-    const url = new URL(`https://${domain}`)
-    return url.hostname === domain.toLowerCase() ? url.toString() : null
-  } catch {
-    return null
-  }
-}
-
-function useProjectOverview(orgSlug: string, projectId: string) {
-  return useQuery<ProjectOverview>({
-    queryKey: ['orgs', orgSlug, 'projects', projectId, 'overview'],
+function useProject(orgSlug: string, projectId: string) {
+  return useQuery<Project>({
+    queryKey: ["orgs", orgSlug, "projects", projectId],
     queryFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-      const res = await fetch(
-        `${baseUrl}/organizations/${orgSlug}/projects/${projectId}`,
-        { credentials: 'include' }
-      )
-      if (!res.ok) throw new Error('Projekt nicht gefunden')
-      return res.json()
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/organizations/${orgSlug}/projects/${projectId}`, { credentials: "include" });
+      if (!response.ok) throw new Error("Projekt konnte nicht geladen werden");
+      return response.json();
     },
-    placeholderData: {
-      id: projectId,
-      name: projectId,
-      description: 'Kein API-Endpunkt verbunden – Platzhalterdaten',
-      domain: 'app.example.com',
-      branch: 'main',
-      lastCommit: 'a3f8c2d',
-      lastCommitMsg: 'fix: improve error handling in auth flow',
-      status: 'success',
-      deployedAt: 'Vor 5 Min.',
-      buildDuration: '2m 12s',
-      uptime: '99.98%',
-      recentDeployments: [
-        { id: 'd1', status: 'success', branch: 'main',        commit: 'a3f8c2d', deployedAt: 'Vor 5 Min.',  duration: '2m 12s', triggeredBy: 'Push' },
-        { id: 'd2', status: 'failed',  branch: 'main',        commit: 'b91e4f7', deployedAt: 'Vor 2 Std.', duration: '45s',    triggeredBy: 'Push' },
-        { id: 'd3', status: 'success', branch: 'feat/redesign',commit: 'd5c2a89', deployedAt: 'Vor 1 Tag', duration: '1m 58s', triggeredBy: 'PR-Merge' },
-      ],
-    },
-  })
+  });
+}
+
+function dateLabel(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unbekannt" : new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 export default function ProjectDetailPage() {
-  const { orgSlug, projectId } = useParams<{ orgSlug: string; projectId: string }>()
-  const router = useRouter()
-  const queryClient = useQueryClient()
-  const { data: project, isLoading } = useProjectOverview(orgSlug, projectId)
+  const { orgSlug, projectId } = useParams<{ orgSlug: string; projectId: string }>();
+  const router = useRouter();
+  const { data: project, isLoading, isError, refetch } = useProject(orgSlug, projectId);
 
-  const deployMutation = useMutation({
-    mutationFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-      const res = await fetch(
-        `${baseUrl}/organizations/${orgSlug}/projects/${projectId}/deploy`,
-        { method: 'POST', credentials: 'include' }
-      )
-      if (!res.ok) throw new Error('Deployment fehlgeschlagen')
-      return res.json()
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orgs', orgSlug, 'projects', projectId] })
-    },
-  })
+  if (isLoading) return <div className="space-y-4 p-6">{[1, 2, 3].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl border border-white/[0.06] bg-[#1e272e]" />)}</div>;
+  if (isError || !project) return <div className="p-6"><div className="rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-100">Projekt konnte nicht geladen werden. <button type="button" onClick={() => refetch()} className="ml-2 underline underline-offset-2">Erneut versuchen</button></div></div>;
 
-  if (isLoading || !project) {
-    return (
-      <div className="space-y-4 p-6">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-24 animate-pulse rounded-xl border border-white/[0.06] bg-[#1e272e]" />
-        ))}
-      </div>
-    )
-  }
-
-  const statusCfg = STATUS_MAP[project.status]
-  const StatusIcon = statusCfg.icon
-  const projectUrl = getExternalProjectUrl(project.domain)
-
-  return (
-    <div className="space-y-6 p-6">
-      {/* Quick-Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <StatusIcon className={`h-4 w-4 ${statusCfg.color}`} />
-          <span className={`text-sm font-medium ${statusCfg.color}`}>{statusCfg.label}</span>
-          <span className="text-zinc-700">·</span>
-          <span className="text-sm text-zinc-500">{project.deployedAt}</span>
-        </div>
-        <div className="flex gap-2">
-          {projectUrl && (
-            <Button variant="outline" size="sm" asChild>
-              <a href={projectUrl} target="_blank" rel="noopener noreferrer" className="gap-1.5">
-                <ExternalLink className="h-3.5 w-3.5" />
-                {project.domain}
-              </a>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => router.push(`/${orgSlug}/projects/${projectId}/deployments`)}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Rollback
-          </Button>
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => deployMutation.mutate()}
-            disabled={deployMutation.isPending}
-          >
-            <Rocket className="h-3.5 w-3.5" />
-            {deployMutation.isPending ? 'Deploying …' : 'Deploy'}
-          </Button>
-        </div>
-      </div>
-
-      {/* Info-Karten */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          { icon: GitBranch, label: 'Branch', value: project.branch },
-          { icon: GitCommit, label: 'Letzter Commit', value: `${project.lastCommit} – ${project.lastCommitMsg}` },
-          { icon: Clock,     label: 'Uptime',         value: project.uptime },
-        ].map(({ icon: Icon, label, value }) => (
-          <div key={label} className="rounded-xl border border-white/[0.06] bg-[#1e272e] p-4">
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </div>
-            <p className="mt-1.5 truncate text-sm font-medium text-zinc-200">{value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Letzte Deployments */}
-      <div className="rounded-xl border border-white/[0.06] bg-[#1e272e]">
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-          <h2 className="text-sm font-semibold text-zinc-100">Letzte Deployments</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push(`/${orgSlug}/projects/${projectId}/deployments`)}
-          >
-            Alle ansehen
-          </Button>
-        </div>
-        <div className="divide-y divide-white/[0.04]">
-          {project.recentDeployments.map((dep) => {
-            const cfg = STATUS_MAP[dep.status]
-            const Icon = cfg.icon
-            return (
-              <button
-                key={dep.id}
-                type="button"
-                onClick={() => router.push(`/${orgSlug}/projects/${projectId}/deployments/${dep.id}`)}
-                className="flex w-full items-center gap-4 px-5 py-3.5 text-left transition-colors hover:bg-white/[0.02]"
-              >
-                <Icon className={`h-4 w-4 shrink-0 ${cfg.color}`} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm text-zinc-200">{dep.commit}</span>
-                    <span className="rounded border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-500">
-                      {dep.branch}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-zinc-600">
-                    {dep.triggeredBy} · Dauer: {dep.duration}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <span className={`text-xs font-medium ${cfg.color}`}>{cfg.label}</span>
-                  <p className="mt-0.5 text-[11px] text-zinc-600">{dep.deployedAt}</p>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+  return <div className="space-y-6 p-6">
+    <div className="flex flex-wrap items-start justify-between gap-4"><PageHeader title={project.name} description={project.description ?? "Dieses Projekt ist bereit zur Konfiguration."} /><ResourceStatusBadge status={project.status} /></div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="rounded-xl border border-white/[0.06] bg-[#1e272e] p-4"><p className="text-xs text-zinc-500">Quelle</p><p className="mt-1.5 capitalize text-sm font-medium text-zinc-200">{project.sourceType}</p></section>
+      <section className="rounded-xl border border-white/[0.06] bg-[#1e272e] p-4"><p className="text-xs text-zinc-500">Branch</p><p className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-zinc-200"><GitBranch className="size-3.5 text-[#81ecec]" />{project.branch}</p></section>
+      <section className="rounded-xl border border-white/[0.06] bg-[#1e272e] p-4"><p className="text-xs text-zinc-500">Projektkennung</p><p className="mt-1.5 font-mono text-sm text-zinc-200">{project.slug}</p></section>
+      <section className="rounded-xl border border-white/[0.06] bg-[#1e272e] p-4"><p className="text-xs text-zinc-500">Zuletzt geändert</p><p className="mt-1.5 text-sm font-medium text-zinc-200">{dateLabel(project.updatedAt)}</p></section>
     </div>
-  )
+    {project.gitUrl ? <section className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-[#1e272e] p-4 text-sm text-zinc-300"><GitFork className="size-4 text-[#81ecec]" /><span className="min-w-0 flex-1 truncate font-mono text-xs">{project.gitUrl}</span><a href={project.gitUrl} target="_blank" rel="noopener noreferrer" className="text-[#81ecec] hover:underline">Repository öffnen</a></section> : null}
+    {project.routingTargetUrl ? <section className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-[#1e272e] p-4 text-sm text-zinc-300"><Link2 className="size-4 text-[#81ecec]" /><span className="min-w-0 flex-1 truncate">{project.routingTargetUrl}</span></section> : null}
+    <CapabilityNotice title="Deployment-Runtime wird vorbereitet" description="Deployments, Laufzeitstatus und Rollbacks werden erst aktiviert, wenn die Control Plane einen verbundenen Deployment-Service meldet. Dieses Projekt zeigt aktuell ausschließlich gespeicherte Konfigurationsdaten." />
+    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => router.push(`/${orgSlug}/projects/${projectId}/domains`)}>Domains verwalten</Button><Button variant="outline" onClick={() => router.push(`/${orgSlug}/projects/${projectId}/environments`)}>Umgebungen verwalten</Button><Button variant="outline" onClick={() => router.push(`/${orgSlug}/projects/${projectId}/settings/general`)}>Projekt bearbeiten</Button><Button disabled className="gap-2"><Rocket className="size-3.5" />Deployment geplant</Button></div>
+  </div>;
 }

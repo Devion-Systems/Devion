@@ -120,8 +120,13 @@ fi
 touch "$INSTALL_DIR/data/traefik/acme/acme.json"
 chmod 600 "$INSTALL_DIR/data/traefik/acme/acme.json"
 
-info "Baue und starte Devion"
-docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-compose.yml" up --build --detach --remove-orphans
+info "Baue Devion und führe Datenbankmigrationen aus"
+compose=(docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-compose.yml")
+"${compose[@]}" build migrate api dashboard
+"${compose[@]}" run --rm migrate || fail "Datenbankmigration fehlgeschlagen. Logs: ${compose[*]} run --rm migrate"
+
+info "Starte Devion"
+"${compose[@]}" up --detach --remove-orphans
 
 info "Warte auf API-Healthcheck"
 for _ in $(seq 1 60); do

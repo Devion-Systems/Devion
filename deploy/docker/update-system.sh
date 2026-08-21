@@ -28,15 +28,25 @@ if [ -f "$workspace/deploy/docker/.env" ]; then
   set -a
   . "$workspace/deploy/docker/.env"
   set +a
-  docker exec -e "PGPASSWORD=$POSTGRES_PASSWORD" devion-postgres-1 \
-    pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$workspace/data/backups/control-db-$backup_timestamp.sql.gz"
+  backup_file="$workspace/data/backups/control-db-$backup_timestamp.sql"
+  docker compose --env-file "$workspace/deploy/docker/.env" -f "$workspace/deploy/docker/docker-compose.yml" \
+    exec -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
+    pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$backup_file"
+  gzip "$backup_file"
 fi
 
 git -C "$workspace" fetch --depth 1 origin "$ref"
 git -C "$workspace" checkout --force FETCH_HEAD
 
-docker compose --env-file "$workspace/deploy/docker/.env" -f "$workspace/deploy/docker/docker-compose.yml" up --build -d migrate
-docker compose --env-file "$workspace/deploy/docker/.env" -f "$workspace/deploy/docker/docker-compose.yml" up --build -d --force-recreate api dashboard traefik
+compose() {
+  docker compose --env-file "$workspace/deploy/docker/.env" -f "$workspace/deploy/docker/docker-compose.yml" "$@"
+}
+
+# This intentionally runs in the foreground. A failed migration leaves the
+# existing application containers untouched and records a failed update state.
+compose build migrate api dashboard
+compose run --rm migrate
+compose up -d --force-recreate --no-deps api dashboard traefik
 
 write_state succeeded
 completed=1

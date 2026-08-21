@@ -180,6 +180,23 @@ function NavLink({
     (pathname.startsWith(`${item.href}/`) && item.href !== "/admin/system");
   const Icon = item.icon;
 
+  if (item.planned) {
+    return (
+      <div
+        aria-label={`${item.label} – geplant`}
+        className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600"
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        {!collapsed && (
+          <>
+            <span className="truncate">{item.label}</span>
+            <span className="ml-auto rounded border border-white/[0.08] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide">Plan</span>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Link
       href={item.href}
