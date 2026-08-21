@@ -84,7 +84,17 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" diff --quiet || fail "Lokale Code-Änderungen erkannt. Update abgebrochen; Daten und Konfiguration bleiben unverändert."
   git -C "$INSTALL_DIR" diff --cached --quiet || fail "Gestagte Code-Änderungen erkannt. Update abgebrochen; Daten und Konfiguration bleiben unverändert."
   git -C "$INSTALL_DIR" fetch --depth 1 origin "$DEVION_GIT_REF"
-  git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD || fail "Kein Fast-Forward-Update möglich. Daten und Konfiguration bleiben unverändert."
+  if git -C "$INSTALL_DIR" merge-base --is-ancestor HEAD FETCH_HEAD; then
+    git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD
+  else
+    # A force-pushed or reinitialised public repository has no common Git
+    # history with an existing deployment.  Only tracked source files are
+    # reset here; .env, data/, bind mounts and Docker volumes are not touched.
+    backup_ref="devion-before-source-update-$(date +%Y%m%d%H%M%S)"
+    git -C "$INSTALL_DIR" branch "$backup_ref" HEAD
+    info "Unterschiedliche Git-Historie erkannt. Quellcode wird aktualisiert; Sicherung: $backup_ref"
+    git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
+  fi
 else
   info "Lade Devion herunter"
   git clone --depth 1 --branch "$DEVION_GIT_REF" "$REPOSITORY_URL" "$INSTALL_DIR"
