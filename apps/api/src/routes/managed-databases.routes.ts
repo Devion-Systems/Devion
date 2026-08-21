@@ -14,14 +14,14 @@ const input = z.object({
     .regex(/^[a-z][a-z0-9-]{1,62}$/),
   engine: z.literal("postgresql"),
   version: z.enum(postgresVersions),
-  plan: z.enum(["starter", "standard", "performance"]).default("starter"),
   databaseName: z.string().trim().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
   username: z.string().trim().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
   password: z.string().min(12).max(128).optional(),
   region: z.string().max(80).default("local"),
   maintenanceWindow: z.string().max(120).optional(),
 });
-const updateInput = input.pick({ name: true, engine: true, version: true, plan: true, region: true, maintenanceWindow: true });
+const updateInput = input.pick({ name: true, engine: true, version: true, region: true, maintenanceWindow: true });
+const DEFAULT_DATABASE_PLAN = "starter" as const;
 const routes = new Hono<AppEnv>();
 const postgresRuntime = new PostgresRuntime();
 routes.use("/*", requireAuthenticatedUser);
@@ -93,13 +93,13 @@ routes.post("/:orgSlug/databases", async (c) => {
   const username = parsed.data.username ?? "devion";
   const password = crypto.getRandomValues(new Uint8Array(24));
   const generatedPassword = parsed.data.password ?? Buffer.from(password).toString("base64url");
-  const resources = databasePlans[parsed.data.plan];
+  const resources = databasePlans[DEFAULT_DATABASE_PLAN];
   try {
     await db.insert(managedDatabases).values({
       name: parsed.data.name,
       engine: parsed.data.engine,
       version: parsed.data.version,
-      plan: parsed.data.plan,
+      plan: DEFAULT_DATABASE_PLAN,
       region: parsed.data.region,
       maintenanceWindow: parsed.data.maintenanceWindow,
       id,
@@ -123,7 +123,7 @@ routes.post("/:orgSlug/databases", async (c) => {
       username,
       password: generatedPassword,
       version: parsed.data.version,
-      plan: parsed.data.plan,
+      plan: DEFAULT_DATABASE_PLAN,
     });
     const status = await postgresRuntime.status(containerName);
     await db.update(managedDatabases).set({ status }).where(eq(managedDatabases.id, id));
@@ -155,6 +155,48 @@ routes.get("/:orgSlug/databases/:databaseId", async (c) => {
   if (!database) return c.json({ error: "Database not found" }, 404);
   return c.json({ ...database, status: await postgresRuntime.status(database.containerName) });
 });
+routes.post("/:orgSlug/databases/:databaseId/retry", async (c) => {
+  const scope = await access(c.req.raw, c.req.param("orgSlug"));
+  if (!scope) return c.json({ error: "Not found" }, 404);
+  if (!canManageDatabases(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  const database = await databaseInScope(scope.org.id, c.req.param("databaseId"));
+  if (!database) return c.json({ error: "Database not found" }, 404);
+  if (database.status !== "failed" && (await postgresRuntime.status(database.containerName)) !== "failed") {
+    return c.json({ error: "Only failed databases can be retried" }, 409);
+  }
+
+  const password = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
+  await db.update(managedDatabases).set({ status: "provisioning" }).where(eq(managedDatabases.id, database.id));
+  try {
+    await postgresRuntime.removeIfPresent(database.containerName);
+    await postgresRuntime.provision({
+      containerName: database.containerName,
+      databaseName: database.databaseName,
+      username: database.username,
+      password,
+      version: database.version,
+      plan: database.plan,
+    });
+    const status = await postgresRuntime.status(database.containerName);
+    await db.update(managedDatabases).set({ status }).where(eq(managedDatabases.id, database.id));
+    return c.json({
+      id: database.id,
+      status,
+      connection: {
+        host: database.containerName,
+        port: 5432,
+        database: database.databaseName,
+        username: database.username,
+        password,
+        url: `postgresql://${encodeURIComponent(database.username)}:${encodeURIComponent(password)}@${database.containerName}:5432/${encodeURIComponent(database.databaseName)}`,
+      },
+    });
+  } catch (error) {
+    await db.update(managedDatabases).set({ status: "failed" }).where(eq(managedDatabases.id, database.id));
+    c.get("logger").error({ error, databaseId: database.id }, "PostgreSQL retry provisioning failed");
+    return c.json({ error: "Database provisioning retry failed" }, 503);
+  }
+});
 routes.patch("/:orgSlug/databases/:databaseId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
@@ -170,11 +212,9 @@ routes.patch("/:orgSlug/databases/:databaseId", async (c) => {
   if (parsed.data.engine && parsed.data.engine !== current.engine) {
     return c.json({ error: "Database engine cannot be changed" }, 400);
   }
-  const plan = parsed.data.plan ?? current.plan;
-  if (plan !== current.plan) await postgresRuntime.updatePlan(current.containerName, plan);
   const result = await db
     .update(managedDatabases)
-    .set({ ...parsed.data, ...(plan !== current.plan ? databasePlans[plan] : {}) })
+    .set(parsed.data)
     .where(
       and(
         eq(managedDatabases.id, c.req.param("databaseId")),

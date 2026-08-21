@@ -9,7 +9,6 @@ export default function DatabasesNewPage() {
   const [name, setName] = useState("");
   const engine = "postgresql";
   const [version, setVersion] = useState("16");
-  const [plan, setPlan] = useState("starter");
   const [databaseName, setDatabaseName] = useState("app");
   const [username, setUsername] = useState("devion");
   const [password, setPassword] = useState("");
@@ -26,7 +25,6 @@ export default function DatabasesNewPage() {
           name,
           engine,
           version,
-          plan,
           databaseName,
           username,
           ...(password ? { password } : {}),
@@ -53,7 +51,7 @@ export default function DatabasesNewPage() {
     <div className="mx-auto max-w-2xl space-y-6 p-5 sm:p-7">
       <PageHeader
         title="Neue Datenbank"
-        description="PostgreSQL wird isoliert auf diesem Devion-Host mit dem gewählten Ressourcenprofil bereitgestellt."
+        description="PostgreSQL wird isoliert auf diesem Devion-Host mit einer sicheren Standardkonfiguration bereitgestellt."
       />
       <form
         className="space-y-4 rounded-2xl border border-white/[0.07] bg-[#172128] p-6"
@@ -115,22 +113,6 @@ export default function DatabasesNewPage() {
             <input id="initial-password" type="password" minLength={12} className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" placeholder="Leer lassen für automatische Generierung" />
           </label>
         </fieldset>
-        <label
-          className="block space-y-2 text-sm text-zinc-300"
-          htmlFor="database-plan"
-        >
-          Profil
-          <select
-            id="database-plan"
-            className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3"
-            value={plan}
-            onChange={(event) => setPlan(event.target.value)}
-          >
-            <option value="starter">Starter</option>
-            <option value="standard">Standard</option>
-            <option value="performance">Performance</option>
-          </select>
-        </label>
         {message ? <p className="text-sm text-red-300">{message}</p> : null}
         <Button type="submit">Provisionierung starten</Button>
       </form>

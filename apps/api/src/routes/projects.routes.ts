@@ -1,5 +1,5 @@
-import { db, member, organization, projectDomains, projects, team } from "@repo/db";
-import { and, asc, eq } from "drizzle-orm";
+import { db, managedDatabases, member, organization, projectDomains, projects, team } from "@repo/db";
+import { and, asc, count, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
@@ -121,6 +121,46 @@ projectRoutes.get("/:orgSlug/projects", async (c) => {
     .orderBy(asc(projects.name));
 
   return c.json(items);
+});
+
+/** Actual organization overview data. Deployment history is intentionally not inferred until a deployment runtime records it. */
+projectRoutes.get("/:orgSlug/dashboard", async (c) => {
+  const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
+  if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+  const organizationId = access.organization.id;
+  const [projectItems, projectTotals, healthyProjectTotals, databases, domains] = await Promise.all([
+    db
+      .select({ id: projects.id, name: projects.name, slug: projects.slug, status: projects.status, branch: projects.branch, updatedAt: projects.updatedAt })
+      .from(projects)
+      .where(eq(projects.organizationId, organizationId))
+      .orderBy(desc(projects.updatedAt))
+      .limit(5),
+    db.select({ total: count() }).from(projects).where(eq(projects.organizationId, organizationId)),
+    db
+      .select({ total: count() })
+      .from(projects)
+      .where(and(eq(projects.organizationId, organizationId), eq(projects.status, "healthy"))),
+    db
+      .select({ status: managedDatabases.status, cpuMillicores: managedDatabases.cpuMillicores, memoryMib: managedDatabases.memoryMib, storageGib: managedDatabases.storageGib })
+      .from(managedDatabases)
+      .where(eq(managedDatabases.organizationId, organizationId)),
+    db.select({ id: projectDomains.id }).from(projectDomains).where(eq(projectDomains.organizationId, organizationId)),
+  ]);
+  const allocated = databases.reduce(
+    (total, database) => ({
+      cpuMillicores: total.cpuMillicores + database.cpuMillicores,
+      memoryMib: total.memoryMib + database.memoryMib,
+      storageGib: total.storageGib + database.storageGib,
+    }),
+    { cpuMillicores: 0, memoryMib: 0, storageGib: 0 },
+  );
+  return c.json({
+    projects: { total: projectTotals[0]?.total ?? 0, healthy: healthyProjectTotals[0]?.total ?? 0 },
+    databases: { total: databases.length, ready: databases.filter((database) => database.status === "ready").length, failed: databases.filter((database) => database.status === "failed").length },
+    domains: domains.length,
+    allocated,
+    recentProjects: projectItems,
+  });
 });
 
 projectRoutes.post("/:orgSlug/projects", async (c) => {

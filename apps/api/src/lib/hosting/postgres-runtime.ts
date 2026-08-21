@@ -138,11 +138,25 @@ export class PostgresRuntime {
   }
 
   async remove(containerName: string) {
-    await dockerRequest("DELETE", `/containers/${encodeURIComponent(containerName)}?force=true`);
-    await dockerRequest(
-      "DELETE",
+    await this.removeIfPresent(containerName);
+  }
+
+  /** Remove partial resources left by a failed provisioning attempt. */
+  async removeIfPresent(containerName: string) {
+    for (const path of [
+      `/containers/${encodeURIComponent(containerName)}?force=true`,
       `/volumes/${encodeURIComponent(`${containerName}-data`)}?force=true`,
-    );
+    ]) {
+      try {
+        await dockerRequest("DELETE", path);
+      } catch (error) {
+        // A failed create can leave either resource absent. That is safe to
+        // ignore; other Docker errors must still stop the operation.
+        if (!(error instanceof Error) || !error.message.startsWith("Docker API 404:")) {
+          throw error;
+        }
+      }
+    }
   }
 
   async query(containerName: string, databaseName: string, username: string, sql: string) {
