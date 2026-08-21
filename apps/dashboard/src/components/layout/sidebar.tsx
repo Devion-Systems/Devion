@@ -15,6 +15,7 @@ import { adminNavGroups, getOrgNavGroups, type NavGroup } from "@/config/nav";
 import { useOptionalOrgContext } from "@/features/organizations/context/org-context";
 import { filterNavGroups } from "@/features/permissions/filter-nav";
 import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth-client";
 import { OrgSwitcher } from "./org-switcher";
 
 type SidebarProps = {
@@ -23,6 +24,7 @@ type SidebarProps = {
 
 export function Sidebar({ variant }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const pathname = usePathname();
   const orgGroups = useOrgNavGroupsFiltered();
 
@@ -51,6 +53,7 @@ export function Sidebar({ variant }: SidebarProps) {
         )}
         <button
           type="button"
+          disabled={signingOut}
           onClick={() => setCollapsed(!collapsed)}
           className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
         >
@@ -97,12 +100,18 @@ export function Sidebar({ variant }: SidebarProps) {
         <button
           type="button"
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
-          onClick={() => {
-            /* signOut() */
+          onClick={async () => {
+            setSigningOut(true);
+            try {
+              await authClient.signOut();
+              window.location.assign("/login");
+            } finally {
+              setSigningOut(false);
+            }
           }}
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>Abmelden</span>}
+          {!collapsed && <span>{signingOut ? "Abmelden …" : "Abmelden"}</span>}
         </button>
       </div>
     </aside>
