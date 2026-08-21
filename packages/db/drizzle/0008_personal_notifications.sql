@@ -1,1 +1,0 @@
-CREATE TABLE "personal_notifications" ("id" text PRIMARY KEY NOT NULL, "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE cascade, "title" text NOT NULL, "message" text NOT NULL, "type" text NOT NULL DEFAULT 'system', "is_read" boolean NOT NULL DEFAULT false, "created_at" timestamp DEFAULT now() NOT NULL);

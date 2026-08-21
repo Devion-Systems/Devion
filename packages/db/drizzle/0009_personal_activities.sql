@@ -1,1 +1,0 @@
-CREATE TABLE "personal_activities" ("id" text PRIMARY KEY NOT NULL, "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE cascade, "type" text NOT NULL, "description" text NOT NULL, "created_at" timestamp DEFAULT now() NOT NULL);
