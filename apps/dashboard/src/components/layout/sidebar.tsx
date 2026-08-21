@@ -174,8 +174,10 @@ function NavLink({
   pathname: string;
   collapsed: boolean;
 }) {
-  const isActive =
-    pathname === item.href || pathname.startsWith(`${item.href}/`);
+  // `/admin/system` is a landing page, not a parent navigation entry. Keep
+  // it inactive for deeper system routes such as `/admin/system/updates`.
+  const isActive = pathname === item.href ||
+    (pathname.startsWith(`${item.href}/`) && item.href !== "/admin/system");
   const Icon = item.icon;
 
   return (

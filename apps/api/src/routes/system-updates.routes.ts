@@ -12,7 +12,10 @@ const payload = z.object({ ref: z.string().regex(/^[A-Za-z0-9._/-]{1,128}$/) });
 updates.use("/*", requirePlatformAdmin);
 updates.get("/status", async (c) => {
   try { return c.json({ status: await updater.status(), refs: await updater.refs() }); }
-  catch (error) { c.get("logger").error({ error }, "System updater status unavailable"); return c.json({ error: "System updater is unavailable" }, 503); }
+  catch (error) {
+    c.get("logger").error({ error }, "System updater status unavailable");
+    return c.json({ error: error instanceof Error ? `Update service: ${error.message}` : "System updater is unavailable" }, 503);
+  }
 });
 updates.post("/run", async (c) => {
   if (!isTrustedBrowserOrigin(c.req.header("origin"))) return c.json({ error: "A trusted browser origin is required" }, 403);
