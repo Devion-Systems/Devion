@@ -12,7 +12,7 @@ type Status = { status: "idle" | "running" | "succeeded" | "failed"; ref?: strin
 export default function AdminSystemUpdatesPage() {
   const [selectedRef, setSelectedRef] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const { data, refetch, isLoading } = useQuery({
+  const { data, refetch, isLoading, error } = useQuery({
     queryKey: ["admin", "system-updates"],
     queryFn: async () => {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/system-updates/status`, { credentials: "include" });
@@ -42,6 +42,7 @@ export default function AdminSystemUpdatesPage() {
   return (
     <div className="space-y-6 p-5 sm:p-7">
       <PageHeader title="System Updates" description="Update Devion without deleting configuration, volumes, organizations or projects." />
+      {error ? <p className="rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-sm text-red-100" role="alert">{error instanceof Error ? error.message : "Die verfügbaren Branches konnten nicht geladen werden."}</p> : null}
       <section className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
         <div className="rounded-2xl border border-white/[0.07] bg-[#172128] p-6">
           <div className="flex items-start gap-3"><Download className="mt-0.5 size-5 text-[#00CEC9]" /><div><h2 className="font-semibold text-zinc-100">Select release or branch</h2><p className="mt-1 text-sm text-zinc-500">Only refs fetched from the configured Devion repository can be selected.</p></div></div>
@@ -51,6 +52,7 @@ export default function AdminSystemUpdatesPage() {
               {versions.length ? <optgroup label="Versions">{versions.map((item) => <option key={`version-${item.name}`} value={item.name}>{item.name}</option>)}</optgroup> : null}
             </select>
           </label>
+          {!isLoading && !branches.length && !versions.length ? <p className="mt-2 text-xs text-amber-200">Keine Git-Branches gefunden. Prüfe die Verbindung des Update-Dienstes zu GitHub.</p> : null}
           <div className="mt-5 flex flex-wrap gap-3"><Button type="button" onClick={startUpdate} disabled={!ref || data?.status.status === "running"}><RefreshCw className={data?.status.status === "running" ? "animate-spin" : ""} />{data?.status.status === "running" ? "Update running…" : "Start safe update"}</Button><Button type="button" variant="outline" onClick={() => void refetch()}><RefreshCw />Refresh</Button></div>
           {message ? <p className="mt-4 text-sm text-zinc-300" role="status">{message}</p> : null}
         </div>

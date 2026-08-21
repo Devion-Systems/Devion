@@ -34,12 +34,14 @@ async function exec(command: string[], detach = false) {
     AttachStderr: !detach,
     Cmd: command,
   });
-  return dockerRequest<string>("POST", `/exec/${encodeURIComponent(created.Id)}/start`, { Detach: detach, Tty: false });
+  // TTY keeps Docker's exec response as plain text. Without it Docker prefixes
+  // stdout with multiplexing frames, which breaks parsing of `git ls-remote`.
+  return dockerRequest<string>("POST", `/exec/${encodeURIComponent(created.Id)}/start`, { Detach: detach, Tty: true });
 }
 
 export class SystemUpdater {
   async refs() {
-    const output = await exec(["git", "ls-remote", "--heads", "--tags", "origin"]);
+    const output = await exec(["git", "-C", "/workspace", "ls-remote", "--heads", "--tags", "origin"]);
     const refs: UpdateRef[] = output.split("\n").flatMap<UpdateRef>((line): UpdateRef[] => {
       const [, name] = line.trim().split("\t");
       if (!name || name.endsWith("^{}")) return [];
