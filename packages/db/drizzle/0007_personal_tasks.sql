@@ -1,0 +1,1 @@
+CREATE TABLE "personal_tasks" ("id" text PRIMARY KEY NOT NULL, "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE cascade, "title" text NOT NULL, "description" text, "status" text NOT NULL DEFAULT 'new', "priority" text NOT NULL DEFAULT 'normal', "due_at" timestamp, "created_at" timestamp DEFAULT now() NOT NULL, "updated_at" timestamp DEFAULT now() NOT NULL);

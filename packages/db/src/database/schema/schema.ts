@@ -4,6 +4,7 @@ import { timestamps } from "./timestamp.js";
 export * from "./auth.js";
 export * from "./projects.js";
 export * from "./managed-databases.js";
+export * from "./personal.js";
 
 export const DEVION_DIR = ".devion";
 export const ACTION_FILES = [`${DEVION_DIR}/action.yml`, `${DEVION_DIR}/action.yaml`] as const;

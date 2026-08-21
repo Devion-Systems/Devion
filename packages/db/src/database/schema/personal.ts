@@ -1,0 +1,3 @@
+import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { user } from "./auth.js";
+export const personalTasks = pgTable("personal_tasks", { id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }), title: text("title").notNull(), description: text("description"), status: text("status", { enum: ["new", "in_progress", "waiting", "done", "archived"] }).default("new").notNull(), priority: text("priority", { enum: ["low", "normal", "high", "urgent"] }).default("normal").notNull(), dueAt: timestamp("due_at"), createdAt: timestamp("created_at").defaultNow().notNull(), updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull() });
