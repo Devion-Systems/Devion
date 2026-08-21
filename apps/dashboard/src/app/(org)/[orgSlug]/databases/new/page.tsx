@@ -10,6 +10,9 @@ export default function DatabasesNewPage() {
   const engine = "postgresql";
   const [version, setVersion] = useState("16");
   const [plan, setPlan] = useState("starter");
+  const [databaseName, setDatabaseName] = useState("app");
+  const [username, setUsername] = useState("devion");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -19,7 +22,15 @@ export default function DatabasesNewPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, engine, version, plan }),
+        body: JSON.stringify({
+          name,
+          engine,
+          version,
+          plan,
+          databaseName,
+          username,
+          ...(password ? { password } : {}),
+        }),
       },
     );
     if (!response.ok) {
@@ -74,14 +85,36 @@ export default function DatabasesNewPage() {
           htmlFor="database-version"
         >
           Version
-          <input
+          <select
             id="database-version"
             className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3"
             value={version}
             onChange={(event) => setVersion(event.target.value)}
-            required
-          />
+          >
+            <option value="17">PostgreSQL 17 (latest)</option>
+            <option value="16">PostgreSQL 16 (recommended)</option>
+            <option value="15">PostgreSQL 15</option>
+            <option value="14">PostgreSQL 14</option>
+          </select>
         </label>
+        <fieldset className="space-y-4 rounded-xl border border-white/[0.1] bg-black/10 p-4">
+          <legend className="px-1 text-sm font-medium text-zinc-200">Zugangsdaten</legend>
+          <p className="text-xs leading-5 text-zinc-500">Diese Werte gelten für den ersten PostgreSQL-Benutzer. Ein leeres Passwort wird sicher automatisch erzeugt und nach der Erstellung einmal angezeigt.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block space-y-2 text-sm text-zinc-300" htmlFor="initial-database-name">
+              Datenbankname
+              <input id="initial-database-name" className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3" value={databaseName} onChange={(event) => setDatabaseName(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} required />
+            </label>
+            <label className="block space-y-2 text-sm text-zinc-300" htmlFor="initial-username">
+              Benutzername
+              <input id="initial-username" className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3" value={username} onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} required />
+            </label>
+          </div>
+          <label className="block space-y-2 text-sm text-zinc-300" htmlFor="initial-password">
+            Passwort <span className="text-xs font-normal text-zinc-500">optional, mindestens 12 Zeichen</span>
+            <input id="initial-password" type="password" minLength={12} className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" placeholder="Leer lassen für automatische Generierung" />
+          </label>
+        </fieldset>
         <label
           className="block space-y-2 text-sm text-zinc-300"
           htmlFor="database-plan"

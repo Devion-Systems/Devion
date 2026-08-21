@@ -9,6 +9,8 @@ export const databasePlans = {
   performance: { cpuMillicores: 2000, memoryMib: 4096, storageGib: 200 },
 } as const;
 
+export const postgresVersions = ["17", "16", "15", "14"] as const;
+
 export type DatabasePlan = keyof typeof databasePlans;
 
 type DockerContainer = {

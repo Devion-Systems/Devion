@@ -3,7 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
-import { databasePlans, PostgresRuntime } from "../lib/hosting/postgres-runtime.js";
+import { databasePlans, postgresVersions, PostgresRuntime } from "../lib/hosting/postgres-runtime.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import type { AppEnv } from "../types/env.js";
 
@@ -13,14 +13,15 @@ const input = z.object({
     .trim()
     .regex(/^[a-z][a-z0-9-]{1,62}$/),
   engine: z.literal("postgresql"),
-  version: z
-    .string()
-    .regex(/^\d+(?:\.\d+){0,2}$/)
-    .max(32),
+  version: z.enum(postgresVersions),
   plan: z.enum(["starter", "standard", "performance"]).default("starter"),
+  databaseName: z.string().trim().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
+  username: z.string().trim().regex(/^[a-z][a-z0-9_]{0,62}$/).optional(),
+  password: z.string().min(12).max(128).optional(),
   region: z.string().max(80).default("local"),
   maintenanceWindow: z.string().max(120).optional(),
 });
+const updateInput = input.pick({ name: true, engine: true, version: true, plan: true, region: true, maintenanceWindow: true });
 const routes = new Hono<AppEnv>();
 const postgresRuntime = new PostgresRuntime();
 routes.use("/*", requireAuthenticatedUser);
@@ -88,14 +89,19 @@ routes.post("/:orgSlug/databases", async (c) => {
   if (!parsed.success) return c.json({ error: "Invalid database configuration" }, 400);
   const id = crypto.randomUUID();
   const containerName = `devion-db-${id.replaceAll("-", "")}`;
-  const databaseName = "app";
-  const username = "devion";
+  const databaseName = parsed.data.databaseName ?? "app";
+  const username = parsed.data.username ?? "devion";
   const password = crypto.getRandomValues(new Uint8Array(24));
-  const generatedPassword = Buffer.from(password).toString("base64url");
+  const generatedPassword = parsed.data.password ?? Buffer.from(password).toString("base64url");
   const resources = databasePlans[parsed.data.plan];
   try {
     await db.insert(managedDatabases).values({
-      ...parsed.data,
+      name: parsed.data.name,
+      engine: parsed.data.engine,
+      version: parsed.data.version,
+      plan: parsed.data.plan,
+      region: parsed.data.region,
+      maintenanceWindow: parsed.data.maintenanceWindow,
       id,
       organizationId: scope.org.id,
       createdByUserId: scope.userId,
@@ -131,7 +137,7 @@ routes.post("/:orgSlug/databases", async (c) => {
           database: databaseName,
           username,
           password: generatedPassword,
-          url: `postgresql://${username}:${generatedPassword}@${containerName}:5432/${databaseName}`,
+          url: `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(generatedPassword)}@${containerName}:5432/${encodeURIComponent(databaseName)}`,
         },
       },
       201,
@@ -152,7 +158,7 @@ routes.get("/:orgSlug/databases/:databaseId", async (c) => {
 routes.patch("/:orgSlug/databases/:databaseId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  const parsed = input.partial().safeParse(await c.req.json());
+  const parsed = updateInput.partial().safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid database configuration" }, 400);
   const current = await db.query.managedDatabases.findFirst({
     where: and(
