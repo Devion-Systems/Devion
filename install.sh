@@ -2,7 +2,11 @@
 set -Eeuo pipefail
 
 REPOSITORY_URL="${DEVION_REPOSITORY_URL:-https://github.com/Devion-Systems/Devion.git}"
-VERSION="${DEVION_VERSION:-main}"
+# Keep the deployment ref deliberately separate from operating-system metadata.
+# /etc/os-release contains a generic VERSION variable (for example
+# "24.04.4 LTS (Noble Numbat)").  Using that name here made an existing
+# installation attempt to fetch Ubuntu's version as a Git ref.
+DEVION_GIT_REF="${DEVION_VERSION:-main}"
 INSTALL_DIR="${DEVION_INSTALL_DIR:-/opt/devion}"
 detect_host_ip() {
   hostname -I 2>/dev/null | tr ' ' '\n' | awk \
@@ -68,6 +72,8 @@ command -v docker >/dev/null || fail "Docker Engine muss installiert sein."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 muss installiert sein."
 command -v openssl >/dev/null || fail "openssl muss installiert sein."
 command -v curl >/dev/null || fail "curl muss installiert sein."
+git check-ref-format --branch "$DEVION_GIT_REF" >/dev/null 2>&1 \
+  || fail "Ungültige Devion-Version/Branch: $DEVION_GIT_REF (nutze z. B. main oder DEVION_VERSION=v1.2.0)"
 
 if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR/.git" ]]; then
   fail "$INSTALL_DIR existiert, ist aber keine Devion-Git-Installation."
@@ -77,11 +83,11 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
   info "Aktualisiere vorhandene Installation"
   git -C "$INSTALL_DIR" diff --quiet || fail "Lokale Code-Änderungen erkannt. Update abgebrochen; Daten und Konfiguration bleiben unverändert."
   git -C "$INSTALL_DIR" diff --cached --quiet || fail "Gestagte Code-Änderungen erkannt. Update abgebrochen; Daten und Konfiguration bleiben unverändert."
-  git -C "$INSTALL_DIR" fetch --depth 1 origin "$VERSION"
+  git -C "$INSTALL_DIR" fetch --depth 1 origin "$DEVION_GIT_REF"
   git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD || fail "Kein Fast-Forward-Update möglich. Daten und Konfiguration bleiben unverändert."
 else
   info "Lade Devion herunter"
-  git clone --depth 1 --branch "$VERSION" "$REPOSITORY_URL" "$INSTALL_DIR"
+  git clone --depth 1 --branch "$DEVION_GIT_REF" "$REPOSITORY_URL" "$INSTALL_DIR"
 fi
 
 ENV_FILE="$INSTALL_DIR/deploy/docker/.env"
