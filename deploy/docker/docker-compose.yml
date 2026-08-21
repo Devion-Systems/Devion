@@ -78,17 +78,21 @@ services:
       TRAEFIK_INTERNAL_DOMAIN: ${TRAEFIK_INTERNAL_DOMAIN}
       TRAEFIK_PROJECT_UPSTREAM_TEMPLATE: ${TRAEFIK_PROJECT_UPSTREAM_TEMPLATE}
       TRAEFIK_CNAME_TARGET: ${TRAEFIK_CNAME_TARGET}
+      SYSTEM_UPDATER_CONTAINER: devion-updater
+      SYSTEM_UPDATE_STATE_FILE: /data/system-updates/latest.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ../../data/system-updates:/data/system-updates
       - ../../data/traefik/dynamic:/data/traefik/dynamic
       - ../../data/traefik/certs:/data/traefik/certs
       # Managed PostgreSQL instances are created through the local Docker API.
       # They are labelled and restricted by the API; no database port is
       # published on the host.
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       migrate:
         condition: service_completed_successfully
+      updater:
+        condition: service_started
     healthcheck:
       test: ["CMD", "bun", "-e", "process.exit((await fetch('http://localhost:3000/health')).ok ? 0 : 1)"]
       interval: 10s
@@ -106,6 +110,17 @@ services:
       - traefik.http.routers.devion-api-https.priority=100
       - traefik.http.routers.devion-api-https.tls=true
       - traefik.http.services.devion-api.loadbalancer.server.port=3000
+    networks: [devion]
+
+  updater:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.updater
+    container_name: devion-updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../..:/workspace
     networks: [devion]
 
   dashboard:

@@ -13,6 +13,7 @@ import {
   ScrollText,
   Settings,
   Building2,
+  RefreshCw,
 } from 'lucide-react'
 import type { Permission } from '@/features/permissions/constants'
 
@@ -138,6 +139,7 @@ export const adminNavGroups: NavGroup[] = [
     icon: Gauge,
     items: [
       { label: 'System-Health', href: '/admin/system', icon: Gauge },
+      { label: 'Updates', href: '/admin/system/updates', icon: RefreshCw },
       { label: 'Audit Log', href: '/admin/logs', icon: ScrollText },
       { label: 'TLS-Zertifikate', href: '/admin/settings/certificates', icon: ShieldCheck },
       { label: 'Einstellungen', href: '/admin/settings/plans', icon: Settings },

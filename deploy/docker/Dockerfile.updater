@@ -1,0 +1,8 @@
+FROM docker:27-cli
+
+RUN apk add --no-cache git docker-cli-compose
+COPY deploy/docker/update-system.sh /usr/local/bin/devion-update
+RUN chmod 0755 /usr/local/bin/devion-update
+
+WORKDIR /workspace
+CMD ["sh", "-c", "while true; do sleep 3600; done"]

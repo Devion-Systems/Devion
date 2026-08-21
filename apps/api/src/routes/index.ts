@@ -8,6 +8,7 @@ import { featureRoutes } from "./features.routes.js";
 import { healthRoutes } from "./health.routes.js";
 import { managedDatabaseRoutes } from "./managed-databases.routes.js";
 import { projectRoutes } from "./projects.routes.js";
+import { systemUpdateRoutes } from "./system-updates.routes.js";
 import { vmRoutes } from "./vms.routes.js";
 
 /**
@@ -32,6 +33,7 @@ routes.route("/api/vms", vmRoutes);
 routes.route("/api/ai", aiGatewayRoutes);
 routes.route("/api/admin/analytics", analyticsRoutes);
 routes.route("/api/admin/tls", dashboardTlsRoutes);
+routes.route("/api/admin/system-updates", systemUpdateRoutes);
 
 // Organization-scoped application resources
 routes.route("/organizations", projectRoutes);
