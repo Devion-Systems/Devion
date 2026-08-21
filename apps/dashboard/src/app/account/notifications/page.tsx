@@ -1,21 +1,6 @@
 "use client";
-
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BellRing } from "lucide-react";
-import { DesignEmptyState } from "@/components/layout/design-empty-state";
 import { PageHeader } from "@/components/layout/page-header";
-
-export default function AccountNotificationsPage() {
-  return (
-    <div className="space-y-6 py-1">
-      <PageHeader
-        title="Benachrichtigungen"
-        description="Lege fest, über welche wichtigen Ereignisse du informiert werden möchtest."
-      />
-      <DesignEmptyState
-        icon={BellRing}
-        title="Deine Benachrichtigungen"
-        description="E-Mail- und Push-Präferenzen werden hier in klaren, thematischen Gruppen verwaltet."
-      />
-    </div>
-  );
-}
+type Notification = { id: string; title: string; message: string; type: string; isRead: boolean; createdAt: string };
+export default function AccountNotificationsPage() { const client = useQueryClient(); const { data = [] } = useQuery<Notification[]>({ queryKey: ["personal", "notifications"], queryFn: async () => { const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/personal/notifications`, { credentials: "include" }); if (!response.ok) throw new Error("Benachrichtigungen konnten nicht geladen werden."); return response.json(); } }); async function read(id: string) { await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/personal/notifications/${id}/read`, { method: "PATCH", credentials: "include" }); void client.invalidateQueries({ queryKey: ["personal", "notifications"] }); } return <div className="space-y-6 py-1"><PageHeader title="Benachrichtigungen" description="Wichtige persönliche Ereignisse und Systemhinweise." /><div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.07] bg-[#172128]/90">{data.map(item => <button type="button" key={item.id} onClick={() => !item.isRead && read(item.id)} className="flex w-full gap-3 p-4 text-left hover:bg-white/[0.03]"><BellRing className="mt-0.5 size-4 text-[#81ecec]" /><span><span className={item.isRead ? "text-sm text-zinc-500" : "text-sm font-medium text-zinc-100"}>{item.title}</span><span className="mt-1 block text-xs text-zinc-500">{item.message}</span></span></button>)}{!data.length ? <p className="p-10 text-center text-sm text-zinc-500">Keine Benachrichtigungen vorhanden.</p> : null}</div></div>; }
