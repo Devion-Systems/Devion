@@ -80,6 +80,7 @@ services:
       TRAEFIK_CNAME_TARGET: ${TRAEFIK_CNAME_TARGET}
       SYSTEM_UPDATER_CONTAINER: devion-updater
       SYSTEM_UPDATE_STATE_FILE: /data/system-updates/latest.json
+      DATABASE_PUBLIC_HOST: ${DATABASE_PUBLIC_HOST:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../../data/system-updates:/data/system-updates

@@ -19,6 +19,7 @@ const input = z.object({
   password: z.string().min(12).max(128).optional(),
   region: z.string().max(80).default("local"),
   maintenanceWindow: z.string().max(120).optional(),
+  publicAccess: z.boolean().default(false),
 }).superRefine((value, context) => {
   const allowedVersions = value.engine === "postgresql" ? postgresVersions : value.engine === "mysql" ? mysqlVersions : redisVersions;
   if (!allowedVersions.includes(value.version as never)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["version"], message: "Unsupported database version" });
@@ -36,6 +37,7 @@ const postgresRuntime = new PostgresRuntime();
 routes.use("/*", requireAuthenticatedUser);
 const deleteInput = z.object({ confirmationName: z.string().trim().min(1).max(63) });
 const tableInput = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
+const networkingInput = z.object({ publicAccess: z.boolean() });
 
 function quoteIdentifier(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
@@ -49,12 +51,13 @@ function canManageDatabases(role: string) {
   return role === "owner" || role === "admin";
 }
 
-function connectionFor(database: { engine: "postgresql" | "mysql" | "redis"; containerName: string; databaseName: string; username: string }, password: string) {
-  const host = database.containerName;
+function connectionFor(database: { engine: "postgresql" | "mysql" | "redis"; containerName: string; databaseName: string; username: string }, password: string, external?: { host: string; port: number }) {
+  const host = external?.host ?? database.containerName;
   if (database.engine === "redis") {
-    return { host, port: 6379, database: "0", username: "default", password, url: `redis://:${encodeURIComponent(password)}@${host}:6379/0` };
+    const port = external?.port ?? 6379;
+    return { host, port, database: "0", username: "default", password, url: `redis://:${encodeURIComponent(password)}@${host}:${port}/0` };
   }
-  const port = database.engine === "mysql" ? 3306 : 5432;
+  const port = external?.port ?? (database.engine === "mysql" ? 3306 : 5432);
   const scheme = database.engine === "mysql" ? "mysql" : "postgresql";
   return { host, port, database: database.databaseName, username: database.username, password, url: `${scheme}://${encodeURIComponent(database.username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database.databaseName)}` };
 }
@@ -125,6 +128,7 @@ routes.post("/:orgSlug/databases", async (c) => {
       organizationId: scope.org.id,
       createdByUserId: scope.userId,
       status: "provisioning",
+      publicAccess: parsed.data.publicAccess,
       containerName,
       databaseName,
       username,
@@ -144,14 +148,17 @@ routes.post("/:orgSlug/databases", async (c) => {
       password: generatedPassword,
       version: parsed.data.version,
       plan: DEFAULT_DATABASE_PLAN,
+      publicAccess: parsed.data.publicAccess,
     });
     const status = await postgresRuntime.status(containerName);
+    const publicPort = parsed.data.publicAccess ? await postgresRuntime.publicPort(containerName, parsed.data.engine) : null;
+    const publicHost = process.env.DATABASE_PUBLIC_HOST;
     await db.update(managedDatabases).set({ status }).where(eq(managedDatabases.id, id));
     return c.json(
       {
         id,
         status,
-        connection: connectionFor({ engine: parsed.data.engine, containerName, databaseName, username }, generatedPassword),
+        connection: connectionFor({ engine: parsed.data.engine, containerName, databaseName, username }, generatedPassword, publicPort && publicHost ? { host: publicHost, port: Number(publicPort) } : undefined),
       },
       201,
     );
@@ -166,7 +173,30 @@ routes.get("/:orgSlug/databases/:databaseId", async (c) => {
   if (!scope) return c.json({ error: "Not found" }, 404);
   const database = await databaseInScope(scope.org.id, c.req.param("databaseId"));
   if (!database) return c.json({ error: "Database not found" }, 404);
-  return c.json({ ...database, status: await postgresRuntime.status(database.containerName) });
+  const publicPort = database.publicAccess ? await postgresRuntime.publicPort(database.containerName, database.engine) : null;
+  return c.json({ ...database, status: await postgresRuntime.status(database.containerName), publicPort, publicHost: process.env.DATABASE_PUBLIC_HOST ?? c.req.header("host")?.split(":")[0] ?? null });
+});
+routes.patch("/:orgSlug/databases/:databaseId/networking", async (c) => {
+  const scope = await access(c.req.raw, c.req.param("orgSlug"));
+  if (!scope) return c.json({ error: "Not found" }, 404);
+  if (!canManageDatabases(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  const parsed = networkingInput.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Invalid networking configuration" }, 400);
+  const database = await databaseInScope(scope.org.id, c.req.param("databaseId"));
+  if (!database) return c.json({ error: "Database not found" }, 404);
+  if (database.publicAccess === parsed.data.publicAccess) {
+    const publicPort = database.publicAccess ? await postgresRuntime.publicPort(database.containerName, database.engine) : null;
+    return c.json({ publicAccess: database.publicAccess, publicPort });
+  }
+  try {
+    await postgresRuntime.recreateNetwork({ ...database, publicAccess: parsed.data.publicAccess });
+    await db.update(managedDatabases).set({ publicAccess: parsed.data.publicAccess }).where(eq(managedDatabases.id, database.id));
+    const publicPort = parsed.data.publicAccess ? await postgresRuntime.publicPort(database.containerName, database.engine) : null;
+    return c.json({ publicAccess: parsed.data.publicAccess, publicPort, publicHost: process.env.DATABASE_PUBLIC_HOST ?? c.req.header("host")?.split(":")[0] ?? null });
+  } catch (error) {
+    c.get("logger").error({ error, databaseId: database.id }, "Managed database networking update failed");
+    return c.json({ error: "Database network access could not be updated" }, 503);
+  }
 });
 routes.post("/:orgSlug/databases/:databaseId/retry", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
@@ -190,13 +220,16 @@ routes.post("/:orgSlug/databases/:databaseId/retry", async (c) => {
       password,
       version: database.version,
       plan: database.plan,
+      publicAccess: database.publicAccess,
     });
     const status = await postgresRuntime.status(database.containerName);
+    const publicPort = database.publicAccess ? await postgresRuntime.publicPort(database.containerName, database.engine) : null;
+    const publicHost = process.env.DATABASE_PUBLIC_HOST;
     await db.update(managedDatabases).set({ status }).where(eq(managedDatabases.id, database.id));
     return c.json({
       id: database.id,
       status,
-      connection: connectionFor(database, password),
+      connection: connectionFor(database, password, publicPort && publicHost ? { host: publicHost, port: Number(publicPort) } : undefined),
     });
   } catch (error) {
     await db.update(managedDatabases).set({ status: "failed" }).where(eq(managedDatabases.id, database.id));

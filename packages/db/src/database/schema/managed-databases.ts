@@ -1,4 +1,4 @@
-import { index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
 
 export const managedDatabases = pgTable(
@@ -28,6 +28,7 @@ export const managedDatabases = pgTable(
     cpuMillicores: integer("cpu_millicores").notNull(),
     memoryMib: integer("memory_mib").notNull(),
     storageGib: integer("storage_gib").notNull(),
+    publicAccess: boolean("public_access").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()

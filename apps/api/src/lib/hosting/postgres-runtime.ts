@@ -19,6 +19,7 @@ export type DatabasePlan = keyof typeof databasePlans;
 type DockerContainer = {
   State?: { Running?: boolean; Status?: string; Health?: { Status?: string } };
   Config?: { Env?: string[] };
+  NetworkSettings?: { Ports?: Record<string, Array<{ HostIp: string; HostPort: string }> | null> };
 };
 
 function dockerRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -81,6 +82,7 @@ export class PostgresRuntime {
     password: string;
     version: string;
     plan: DatabasePlan;
+    publicAccess?: boolean;
   }) {
     const volumeName = `${input.containerName}-data`;
     const configuration = {
@@ -138,7 +140,9 @@ export class PostgresRuntime {
           ...resourceLimits(input.plan),
           RestartPolicy: { Name: "unless-stopped" },
           Mounts: [{ Type: "volume", Source: volumeName, Target: configuration.dataPath }],
+          PortBindings: input.publicAccess ? { [`${input.engine === "postgresql" ? 5432 : input.engine === "mysql" ? 3306 : 6379}/tcp`]: [{ HostIp: "0.0.0.0", HostPort: "" }] } : undefined,
         },
+        ExposedPorts: input.publicAccess ? { [`${input.engine === "postgresql" ? 5432 : input.engine === "mysql" ? 3306 : 6379}/tcp`]: {} } : undefined,
         NetworkingConfig: { EndpointsConfig: { [NETWORK]: {} } },
       },
     );
@@ -187,6 +191,21 @@ export class PostgresRuntime {
         }
       }
     }
+  }
+
+  async recreateNetwork(input: { engine: ManagedDatabaseEngine; containerName: string; databaseName: string; username: string; version: string; plan: DatabasePlan; publicAccess: boolean }) {
+    const container = await dockerRequest<DockerContainer>("GET", `/containers/${encodeURIComponent(input.containerName)}/json`);
+    const key = input.engine === "postgresql" ? "POSTGRES_PASSWORD=" : input.engine === "mysql" ? "MYSQL_PASSWORD=" : "REDIS_PASSWORD=";
+    const password = container.Config?.Env?.find((item) => item.startsWith(key))?.slice(key.length);
+    if (!password) throw new Error("Managed database credentials are unavailable");
+    await dockerRequest("DELETE", `/containers/${encodeURIComponent(input.containerName)}?force=true`);
+    await this.provision({ ...input, password });
+  }
+
+  async publicPort(containerName: string, engine: ManagedDatabaseEngine) {
+    const container = await dockerRequest<DockerContainer>("GET", `/containers/${encodeURIComponent(containerName)}/json`);
+    const port = engine === "postgresql" ? 5432 : engine === "mysql" ? 3306 : 6379;
+    return container.NetworkSettings?.Ports?.[`${port}/tcp`]?.[0]?.HostPort ?? null;
   }
 
   async query(containerName: string, databaseName: string, username: string, sql: string) {

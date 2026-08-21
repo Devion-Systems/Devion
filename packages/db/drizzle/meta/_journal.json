@@ -43,6 +43,13 @@
       "when": 1787161200000,
       "tag": "0005_managed_database_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787161800000,
+      "tag": "0006_managed_database_public_access",
+      "breakpoints": true
     }
   ]
 }
