@@ -22,6 +22,6 @@
   },
   "scripts": {
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "bun run src/migrate.ts"
   }
 }
