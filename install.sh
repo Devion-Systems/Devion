@@ -41,8 +41,10 @@ fi
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   info "Aktualisiere vorhandene Installation"
+  git -C "$INSTALL_DIR" diff --quiet || fail "Lokale Code-Änderungen erkannt. Update abgebrochen; Daten und Konfiguration bleiben unverändert."
+  git -C "$INSTALL_DIR" diff --cached --quiet || fail "Gestagte Code-Änderungen erkannt. Update abgebrochen; Daten und Konfiguration bleiben unverändert."
   git -C "$INSTALL_DIR" fetch --depth 1 origin "$VERSION"
-  git -C "$INSTALL_DIR" checkout --force FETCH_HEAD
+  git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD || fail "Kein Fast-Forward-Update möglich. Daten und Konfiguration bleiben unverändert."
 else
   info "Lade Devion herunter"
   git clone --depth 1 --branch "$VERSION" "$REPOSITORY_URL" "$INSTALL_DIR"
