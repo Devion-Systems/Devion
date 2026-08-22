@@ -309,8 +309,8 @@ export default function GameServersPage() {
       />
       {nodes.isSuccess && !nodes.data.some((node) => node.status === "ready" && node.schedulingEnabled) ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-          <span>Zum Starten und Verwalten wird ein verbundener, aktiver Node benötigt.</span>
-          <Button asChild size="sm" variant="outline" className="min-h-10"><Link href={`/${orgSlug}/hardware/connect`}>Node verbinden</Link></Button>
+          <span>Die lokale Hardware wird gerade vorbereitet. Starte den Server erneut, sobald sie als bereit angezeigt wird.</span>
+          <Button asChild size="sm" variant="outline" className="min-h-10"><Link href={`/${orgSlug}/hardware`}>Hardware öffnen</Link></Button>
         </div>
       ) : null}
       {notice ? (

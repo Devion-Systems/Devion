@@ -8,7 +8,6 @@ export const nodes = pgTable(
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id")
-      .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     hostname: text("hostname").notNull(),

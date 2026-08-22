@@ -73,7 +73,14 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml
 
 Re-running the installer performs an in-place update. It preserves data and secrets and keeps a timestamped backup of `deploy/docker/.env`.
 
-## Node agents and workloads
+## Local hosting and additional nodes
+
+The Devion host is an execution target by default: applications and Minecraft
+servers run there without any Node setup. The local agent is enrolled securely
+by the installer and becomes ready shortly after the first start.
+
+Connect a Node only when you need additional hardware or capacity. Create a
+one-time registration token as an organization owner or admin:
 
 Create a one-time node registration token as an organization owner or admin:
 
@@ -82,7 +89,7 @@ POST /organizations/{orgSlug}/nodes/registration-tokens
 { "expiresInSeconds": 3600 }
 ```
 
-For the Docker host installed by Devion, use the returned token exactly once:
+Use the returned token exactly once on the additional target host:
 
 ```bash
 cd /opt/devion
@@ -92,8 +99,8 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml
   agent
 ```
 
-The installer starts a resident local agent which waits for this enrollment.
-After enrollment it picks up its identity from the persistent agent volume; the registration token is no longer needed.
+After enrollment the agent stores its identity in its persistent volume; the
+registration token is no longer needed.
 
 ## Minecraft server management
 

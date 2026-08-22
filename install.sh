@@ -166,6 +166,7 @@ fi
 # defaults for fresh or older installations.
 ensure_env_value "BETTER_AUTH_COOKIE_DOMAIN" ""
 ensure_env_value "TRAEFIK_CNAME_TARGET" ""
+ensure_env_value "DEVION_LOCAL_AGENT_TOKEN" "$(secret)"
 
 info "Bereite Traefik-Verzeichnisse vor"
 install -d -m 700 "$INSTALL_DIR/data/traefik/dynamic" "$INSTALL_DIR/data/traefik/certs" "$INSTALL_DIR/data/traefik/acme"

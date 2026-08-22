@@ -41,6 +41,9 @@ const registerInput = z.object({
     .min(1)
     .default(["container"]),
 });
+const localRegisterInput = registerInput
+  .omit({ registrationToken: true })
+  .extend({ localToken: z.string().min(32).max(512) });
 const heartbeatInput = z.object({
   status: z.enum(["ready", "draining", "offline", "unhealthy"]),
   resources: z.object({
@@ -78,6 +81,9 @@ function tokenHash(value: string) {
 }
 function createSecret() {
   return randomBytes(32).toString("base64url");
+}
+function secretMatches(candidate: string, expected: string) {
+  return timingSafeEqual(Buffer.from(tokenHash(candidate)), Buffer.from(tokenHash(expected)));
 }
 function manager(role: string) {
   return role === "owner" || role === "admin";
@@ -153,7 +159,7 @@ routes.get("/organizations/:orgSlug/nodes", async (c) => {
       createdAt: nodes.createdAt,
     })
     .from(nodes)
-    .where(eq(nodes.organizationId, access.org.id));
+    .where(or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId)));
   return c.json(
     items.map((node) => ({ ...node, schedulingEnabled: node.schedulingEnabled === 1 })),
   );
@@ -164,7 +170,7 @@ routes.get("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
   const node = await db.query.nodes.findFirst({
-    where: and(eq(nodes.id, c.req.param("nodeId")), eq(nodes.organizationId, access.org.id)),
+    where: and(eq(nodes.id, c.req.param("nodeId")), or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId))),
   });
   if (!node) return c.json({ error: "Node not found" }, 404);
   const assignments = await db
@@ -200,7 +206,7 @@ routes.patch("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const updated = await db
     .update(nodes)
     .set({ schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0, updatedAt: new Date() })
-    .where(and(eq(nodes.id, c.req.param("nodeId")), eq(nodes.organizationId, access.org.id)))
+    .where(and(eq(nodes.id, c.req.param("nodeId")), or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId))))
     .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled });
   if (!updated[0]) return c.json({ error: "Node not found" }, 404);
   return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1 });
@@ -248,6 +254,45 @@ routes.post("/api/agents/register", async (c) => {
   });
   if (!enrolled) return c.json({ error: "Registration token was already used" }, 409);
   return c.json({ nodeId, agentToken }, 201);
+});
+
+/**
+ * The host that runs Devion is available by default. Its secret exists only in
+ * the local Compose environment, so it can enroll without being assigned to a
+ * customer organization. Extra, remote hosts still use one-time org tokens.
+ */
+routes.post("/api/agents/local/register", async (c) => {
+  const parsed = localRegisterInput.safeParse(await c.req.json());
+  if (!parsed.success)
+    return c.json({ error: "Invalid local agent registration", issues: parsed.error.flatten() }, 400);
+  const localToken = process.env.DEVION_LOCAL_AGENT_TOKEN;
+  if (!localToken || !secretMatches(parsed.data.localToken, localToken))
+    return c.json({ error: "Local agent authentication required" }, 401);
+  const agentToken = createSecret();
+  const existing = await db.query.nodes.findFirst({
+    where: and(isNull(nodes.organizationId), eq(nodes.hostname, parsed.data.hostname)),
+  });
+  const values = {
+    name: parsed.data.name,
+    hostname: parsed.data.hostname,
+    architecture: parsed.data.architecture,
+    os: parsed.data.os,
+    agentVersion: parsed.data.agentVersion,
+    region: parsed.data.region ?? null,
+    labels: parsed.data.labels,
+    capabilities: parsed.data.capabilities,
+    runtimes: parsed.data.runtimes,
+    status: "provisioning" as const,
+    agentTokenHash: tokenHash(agentToken),
+    updatedAt: new Date(),
+  };
+  const nodeId = existing?.id ?? crypto.randomUUID();
+  if (existing) {
+    await db.update(nodes).set(values).where(eq(nodes.id, existing.id));
+  } else {
+    await db.insert(nodes).values({ id: nodeId, organizationId: null, ...values });
+  }
+  return c.json({ nodeId, agentToken }, existing ? 200 : 201);
 });
 
 routes.post("/api/agents/heartbeat", async (c) => {

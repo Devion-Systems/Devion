@@ -20,7 +20,13 @@ state. It also adds project/application references to new game servers.
 game-server records are deliberately left without an invented project
 assignment.
 
-## Enrol a node
+## Local host and extra nodes
+
+The Devion installation itself automatically enrolls a local, shared runtime.
+It runs applications and Minecraft servers without a separate Node. Use the
+following flow only for additional hardware.
+
+## Enrol an additional node
 
 An organization owner or admin first creates a one-time registration token:
 
@@ -29,8 +35,8 @@ POST /organizations/{orgSlug}/nodes/registration-tokens
 { "expiresInSeconds": 3600 }
 ```
 
-The raw registration token is returned once. For the Docker host installed by
-Devion, run the enrollment command on that host:
+The raw registration token is returned once. Run the enrollment command on the
+additional Docker host:
 
 ```bash
 cd /opt/devion
@@ -40,9 +46,8 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml
   agent
 ```
 
-The resident Compose agent waits for enrollment and then reads its identity
-from its persistent data volume. The one-time registration token is no longer
-needed.
+After enrollment the agent reads its identity from its persistent data volume.
+The one-time registration token is no longer needed.
 
 ## Supported V1 workload path
 

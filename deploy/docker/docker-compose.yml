@@ -85,6 +85,7 @@ services:
       SYSTEM_UPDATER_CONTAINER: devion-updater
       SYSTEM_UPDATE_STATE_FILE: /data/system-updates/latest.json
       DATABASE_PUBLIC_HOST: ${DATABASE_PUBLIC_HOST:-}
+      DEVION_LOCAL_AGENT_TOKEN: ${DEVION_LOCAL_AGENT_TOKEN}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../../data/system-updates:/data/system-updates
@@ -137,6 +138,7 @@ services:
       DEVION_API_URL: http://api:3000
       DEVION_AGENT_NAME: ${DEVION_AGENT_NAME:-devion-local}
       DEVION_AGENT_DATA_DIR: /var/lib/devion-agent
+      DEVION_LOCAL_AGENT_TOKEN: ${DEVION_LOCAL_AGENT_TOKEN}
       DOCKER_SOCKET_PATH: /var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

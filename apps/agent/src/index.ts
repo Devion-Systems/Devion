@@ -75,12 +75,14 @@ async function loadIdentity() {
   try {
     return { identity: identitySchema.parse(JSON.parse(await readFile(identityPath, "utf8"))), enrolled: false };
   } catch {
-    if (!config.DEVION_AGENT_REGISTRATION_TOKEN) return null;
-    const response = await fetch(new URL("/api/agents/register", config.DEVION_API_URL), {
+    const registrationToken = config.DEVION_AGENT_REGISTRATION_TOKEN;
+    const localToken = config.DEVION_LOCAL_AGENT_TOKEN;
+    if (!registrationToken && !localToken) return null;
+    const response = await fetch(new URL(registrationToken ? "/api/agents/register" : "/api/agents/local/register", config.DEVION_API_URL), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        registrationToken: config.DEVION_AGENT_REGISTRATION_TOKEN,
+        ...(registrationToken ? { registrationToken } : { localToken }),
         name: config.DEVION_AGENT_NAME,
         hostname: config.DEVION_AGENT_HOSTNAME,
         architecture: config.DEVION_AGENT_ARCHITECTURE,

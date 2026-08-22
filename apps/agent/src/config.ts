@@ -5,6 +5,7 @@ const schema = z.object({
   DEVION_API_URL: z.string().url(),
   DEVION_AGENT_DATA_DIR: z.string().min(1).default("/var/lib/devion-agent"),
   DEVION_AGENT_REGISTRATION_TOKEN: z.string().min(32).optional(),
+  DEVION_LOCAL_AGENT_TOKEN: z.string().min(32).optional(),
   DEVION_AGENT_NAME: z.string().min(1).max(100).default(hostname()),
   DEVION_AGENT_HOSTNAME: z.string().min(1).max(253).default(hostname()),
   DEVION_AGENT_ARCHITECTURE: z.string().min(1).max(64).default(process.arch),
