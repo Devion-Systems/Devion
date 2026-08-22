@@ -14,7 +14,7 @@ export function DesignEmptyState({
   title: string;
   description: string;
   detail?: string;
-  action?: { label: string; href: string };
+  action?: { label: string; href?: string; onClick?: () => void };
 }) {
   return (
     <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#1e272e]/90 px-5 py-12 text-center shadow-[0_16px_48px_rgba(0,0,0,.14)] sm:px-10">
@@ -32,7 +32,8 @@ export function DesignEmptyState({
           <ArrowUpRight className="h-3.5 w-3.5 text-[#74b9ff]" />
           {detail}
         </p>
-        {action ? <Button asChild size="sm" className="mt-5"><Link href={action.href}>{action.label}</Link></Button> : null}
+        {action?.href ? <Button asChild size="sm" className="mt-5"><Link href={action.href}>{action.label}</Link></Button> : null}
+        {action?.onClick ? <Button size="sm" className="mt-5" onClick={action.onClick}>{action.label}</Button> : null}
       </div>
     </section>
   );
