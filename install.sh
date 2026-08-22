@@ -18,6 +18,10 @@ HOST_IP="${HOST_IP:-127.0.0.1}"
 HTTP_PORT="${DEVION_HTTP_PORT:-80}"
 HTTPS_PORT="${DEVION_HTTPS_PORT:-443}"
 ACME_EMAIL="${DEVION_ACME_EMAIL:-}"
+# Set DEVION_BUILD_NO_CACHE=true only when a host needs to discard Docker's
+# build cache completely (for example after a broken or interrupted update).
+# Normal updates still rebuild changed source layers and pull fresh base images.
+BUILD_NO_CACHE="${DEVION_BUILD_NO_CACHE:-false}"
 
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
@@ -186,16 +190,26 @@ chmod 600 "$INSTALL_DIR/data/traefik/acme/acme.json"
 
 info "Baue Devion und führe Datenbankmigrationen aus"
 compose=(docker compose --env-file "$ENV_FILE" -f "$INSTALL_DIR/deploy/docker/docker-compose.yml")
-"${compose[@]}" build migrate api dashboard agent
+build_args=(build --pull)
+case "$BUILD_NO_CACHE" in
+  true|1|yes) build_args+=(--no-cache) ;;
+  false|0|no|"") ;;
+  *) fail "Invalid DEVION_BUILD_NO_CACHE value: $BUILD_NO_CACHE (use true or false)" ;;
+esac
+# Rebuild the updater with the control plane. Otherwise an existing host can
+# retain an old updater image while API and dashboard source are current.
+"${compose[@]}" "${build_args[@]}" migrate api dashboard agent updater
 "${compose[@]}" run --rm migrate || fail "Datenbankmigration fehlgeschlagen. Logs: ${compose[*]} run --rm migrate"
 
 info "Starte Devion"
 "${compose[@]}" up --detach --remove-orphans
 
-info "Warte auf API-Healthcheck"
+info "Warte auf API und Dashboard"
 for _ in $(seq 1 60); do
   if curl --noproxy "*" --fail --silent --show-error --connect-timeout 2 \
-    "http://$HOST_IP:$HTTP_PORT/health" >/dev/null; then
+    "http://$HOST_IP:$HTTP_PORT/health" >/dev/null \
+    && curl --noproxy "*" --fail --silent --show-error --connect-timeout 2 \
+      "http://$HOST_IP:$HTTP_PORT/login" >/dev/null; then
     break
   fi
   sleep 2
@@ -203,6 +217,9 @@ done
 curl --noproxy "*" --fail --silent --show-error \
   "http://$HOST_IP:$HTTP_PORT/health" >/dev/null \
   || fail "API wurde nicht gesund. Logs: docker compose -f $INSTALL_DIR/deploy/docker/docker-compose.yml logs api"
+curl --noproxy "*" --fail --silent --show-error \
+  "http://$HOST_IP:$HTTP_PORT/login" >/dev/null \
+  || fail "Dashboard wurde nicht gesund. Logs: docker compose -f $INSTALL_DIR/deploy/docker/docker-compose.yml logs dashboard traefik"
 
 info "Installation erfolgreich"
-printf 'Dashboard: http://%s\nAPI health: http://%s/health\n' "$HOST_IP" "$HOST_IP"
+printf 'Dashboard: http://%s:%s\nAPI health: http://%s:%s/health\n' "$HOST_IP" "$HTTP_PORT" "$HOST_IP" "$HTTP_PORT"
