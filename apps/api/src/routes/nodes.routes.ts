@@ -49,6 +49,7 @@ const heartbeatInput = z.object({
     storageMib: resourceQuantity,
   }),
 });
+const nodeSettingsInput = z.object({ schedulingEnabled: z.boolean() });
 const commandResultInput = z
   .object({
     commandId: z.string().uuid(),
@@ -156,6 +157,53 @@ routes.get("/organizations/:orgSlug/nodes", async (c) => {
   return c.json(
     items.map((node) => ({ ...node, schedulingEnabled: node.schedulingEnabled === 1 })),
   );
+});
+
+/** Node details and assignments are read-only control-plane views for the dashboard. */
+routes.get("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
+  const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
+  if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+  const node = await db.query.nodes.findFirst({
+    where: and(eq(nodes.id, c.req.param("nodeId")), eq(nodes.organizationId, access.org.id)),
+  });
+  if (!node) return c.json({ error: "Node not found" }, 404);
+  const assignments = await db
+    .select({
+      id: workloads.id,
+      desiredState: workloads.desiredState,
+      actualState: workloads.actualState,
+      runtimeId: workloads.runtimeId,
+      lastReportedAt: workloads.lastReportedAt,
+      deploymentId: deployments.id,
+      image: deployments.image,
+      applicationId: applications.id,
+      applicationName: applications.name,
+      projectId: applications.projectId,
+    })
+    .from(workloads)
+    .innerJoin(deployments, eq(workloads.deploymentId, deployments.id))
+    .innerJoin(applications, eq(deployments.applicationId, applications.id))
+    .where(eq(workloads.nodeId, node.id));
+  return c.json({
+    ...node,
+    schedulingEnabled: node.schedulingEnabled === 1,
+    assignments,
+  });
+});
+
+routes.patch("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
+  const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
+  if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+  if (!manager(access.membership.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  const parsed = nodeSettingsInput.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Invalid node settings" }, 400);
+  const updated = await db
+    .update(nodes)
+    .set({ schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0, updatedAt: new Date() })
+    .where(and(eq(nodes.id, c.req.param("nodeId")), eq(nodes.organizationId, access.org.id)))
+    .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled });
+  if (!updated[0]) return c.json({ error: "Node not found" }, 404);
+  return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1 });
 });
 
 /** Public enrollment endpoint. It accepts only a single-use registration secret, never a user session. */

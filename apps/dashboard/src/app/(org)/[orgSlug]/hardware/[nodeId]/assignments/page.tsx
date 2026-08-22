@@ -1,15 +1,15 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { useQuery } from "@tanstack/react-query";
+import { Boxes } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { DesignEmptyState } from "@/components/layout/design-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
+import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
+import { Button } from "@/components/ui/button";
 
-export default function HardwareDetailAssignmentsPage({ params }: { params: { orgSlug: string, nodeId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Zuweisungen"
-        description="Welche Projekte/Datenbanken laufen auf diesem Node"
-      />
-      {/* TODO: Welche Projekte/Datenbanken laufen auf diesem Node */}
-    </div>
-  )
-}
+type Assignment = { id: string; desiredState: string; actualState: string; runtimeId: string | null; image: string; applicationId: string; applicationName: string; projectId: string | null; lastReportedAt: string | null };
+type Node = { name: string; assignments: Assignment[] };
+const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
+export default function HardwareDetailAssignmentsPage() { const { orgSlug, nodeId } = useParams<{ orgSlug: string; nodeId: string }>(); const node = useQuery<Node>({ queryKey: ["org", orgSlug, "node", nodeId], queryFn: async () => { const response = await fetch(api(`/organizations/${orgSlug}/nodes/${nodeId}`), { credentials: "include" }); if (!response.ok) throw new Error("Workloads konnten nicht geladen werden"); return response.json(); } }); return <div className="space-y-6 p-6"><div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Workload-Zuweisungen" description={node.data ? `Workloads auf ${node.data.name}` : "Vom Node gemeldete Workloads"} /><Button asChild variant="outline"><Link href={`/${orgSlug}/hardware/${nodeId}`}>Zur Übersicht</Link></Button></div>{node.isError ? <p role="alert" className="rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{node.error.message}</p> : null}{node.data?.assignments.length === 0 ? <DesignEmptyState icon={Boxes} title="Keine Workloads zugewiesen" description="Dieser Node führt aktuell keine Workloads aus." detail="Sobald ein Deployment platziert wird, erscheint es hier." /> : null}<div className="space-y-3">{(node.data?.assignments ?? []).map((workload) => <section key={workload.id} className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate font-medium text-zinc-100">{workload.applicationName}</h2><p className="mt-1 truncate font-mono text-xs text-zinc-500">{workload.image}</p></div><ResourceStatusBadge status={workload.actualState === "running" ? "healthy" : workload.actualState} /></div><dl className="mt-4 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-zinc-500">Gewünscht</dt><dd className="mt-1 text-zinc-200">{workload.desiredState}</dd></div><div><dt className="text-zinc-500">Runtime-ID</dt><dd className="mt-1 truncate font-mono text-zinc-200">{workload.runtimeId ?? "Noch nicht gemeldet"}</dd></div><div><dt className="text-zinc-500">Letzte Meldung</dt><dd className="mt-1 text-zinc-200">{workload.lastReportedAt ? new Intl.DateTimeFormat("de-DE", { dateStyle: "short", timeStyle: "short" }).format(new Date(workload.lastReportedAt)) : "–"}</dd></div></dl></section>)}</div></div>; }

@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminSettingsPlansPage() {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Pricing-Pläne"
-        description="Plans definieren/bearbeiten"
-      />
-      {/* TODO: Plans definieren/bearbeiten */}
-    </div>
-  )
-}
+import { BadgeEuro } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function PlansPage() { return <CapabilityPage icon={BadgeEuro} title="Pläne" description="Produktpläne und Kapazitätsgrenzen zentral verwalten." noticeTitle="Planverwaltung wird vorbereitet" noticeDescription="Pläne werden erst editierbar, wenn Abrechnung und Limitdurchsetzung vollständig verfügbar sind." />; }

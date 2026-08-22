@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function RolesDetailPage({ params }: { params: { orgSlug: string, roleId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Rolle bearbeiten"
-        description="Permission-Editor basierend auf features/permissions/constants.ts"
-      />
-      {/* TODO: Permission-Editor basierend auf features/permissions/constants.ts */}
-    </div>
-  )
-}
+import { ShieldCheck } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function RoleDetailPage() { return <CapabilityPage icon={ShieldCheck} title="Rolle" description="Berechtigungen einer organisationsweiten Rolle prüfen und verwalten." noticeTitle="Berechtigungseditor wird vorbereitet" noticeDescription="Rollen werden erst editierbar, wenn die vollständige Berechtigungsmatrix serverseitig durchgesetzt wird." />; }

@@ -1,15 +1,14 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { useQuery } from "@tanstack/react-query";
+import { Cpu, HardDrive, MemoryStick } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
 
-export default function HardwareDetailResourcesPage({ params }: { params: { orgSlug: string, nodeId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Node-Ressourcen"
-        description="ResourceGauge für CPU/RAM/Storage-Auslastung"
-      />
-      {/* TODO: ResourceGauge für CPU/RAM/Storage-Auslastung */}
-    </div>
-  )
-}
+type Quantity = { capacity: number; allocatable: number; reserved: number; usage: number };
+type Node = { name: string; resources: { cpuMilli: Quantity; memoryMib: Quantity; storageMib: Quantity } | null };
+const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
+function Gauge({ icon: Icon, label, data, unit }: { icon: typeof Cpu; label: string; data: Quantity | undefined; unit: string }) { const percent = data?.capacity ? Math.min(100, Math.round((data.usage / data.capacity) * 100)) : 0; return <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5"><div className="flex items-center gap-2"><Icon className="size-5 text-[#81ecec]" /><h2 className="font-medium text-zinc-100">{label}</h2></div><div className="mt-6 h-3 overflow-hidden rounded-full bg-white/[0.07]"><div className="h-full rounded-full bg-gradient-to-r from-[#0984e3] to-[#00cec9]" style={{ width: `${percent}%` }} /></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><div><p className="text-zinc-500">Auslastung</p><p className="mt-1 font-medium text-zinc-100">{data ? `${data.usage} ${unit} (${percent}%)` : "Noch keine Werte"}</p></div><div><p className="text-zinc-500">Kapazität</p><p className="mt-1 font-medium text-zinc-100">{data ? `${data.capacity} ${unit}` : "–"}</p></div><div><p className="text-zinc-500">Planbar</p><p className="mt-1 font-medium text-zinc-100">{data ? `${data.allocatable} ${unit}` : "–"}</p></div><div><p className="text-zinc-500">Reserviert</p><p className="mt-1 font-medium text-zinc-100">{data ? `${data.reserved} ${unit}` : "–"}</p></div></div></section>; }
+export default function HardwareDetailResourcesPage() { const { orgSlug, nodeId } = useParams<{ orgSlug: string; nodeId: string }>(); const node = useQuery<Node>({ queryKey: ["org", orgSlug, "node", nodeId], queryFn: async () => { const response = await fetch(api(`/organizations/${orgSlug}/nodes/${nodeId}`), { credentials: "include" }); if (!response.ok) throw new Error("Node-Ressourcen konnten nicht geladen werden"); return response.json(); } }); return <div className="space-y-6 p-6"><div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Node-Ressourcen" description={node.data ? `Aktuelle Meldung von ${node.data.name}` : "Aktuelle Kapazität und Reservierungen"} /><Button asChild variant="outline"><Link href={`/${orgSlug}/hardware/${nodeId}`}>Zur Übersicht</Link></Button></div>{node.isError ? <p role="alert" className="rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{node.error.message}</p> : null}{node.isLoading ? <div className="grid gap-4 lg:grid-cols-3"><div className="h-64 animate-pulse rounded-2xl bg-white/[0.05]" /><div className="h-64 animate-pulse rounded-2xl bg-white/[0.05]" /><div className="h-64 animate-pulse rounded-2xl bg-white/[0.05]" /></div> : null}{node.data ? <div className="grid gap-4 lg:grid-cols-3"><Gauge icon={Cpu} label="CPU" data={node.data.resources?.cpuMilli} unit="m" /><Gauge icon={MemoryStick} label="Arbeitsspeicher" data={node.data.resources?.memoryMib} unit="MiB" /><Gauge icon={HardDrive} label="Speicher" data={node.data.resources?.storageMib} unit="MiB" /></div> : null}</div>; }

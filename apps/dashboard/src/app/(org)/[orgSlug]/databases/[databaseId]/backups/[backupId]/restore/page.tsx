@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function DatabasesDetailBackupsDetailRestorePage({ params }: { params: { orgSlug: string, databaseId: string, backupId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Restore"
-        description="RestoreConfirmDialog — zweistufige Bestätigung, destruktiv"
-      />
-      {/* TODO: RestoreConfirmDialog — zweistufige Bestätigung, destruktiv */}
-    </div>
-  )
-}
+import { ArchiveRestore } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function DatabaseRestorePage() { return <CapabilityPage icon={ArchiveRestore} title="Backup wiederherstellen" description="Eine Datenbank aus einer verifizierten Sicherung wiederherstellen." noticeTitle="Wiederherstellung ist geschützt" noticeDescription="Diese destruktive Aktion wird erst verfügbar, wenn die Datenbank-Runtime und ein vollständiger Wiederherstellungsprozess implementiert sind." />; }

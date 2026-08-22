@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminOrganizationsDetailBillingPage({ params }: { params: { orgId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Org-Billing (Admin)"
-        description="Zahlungsstatus, Plan dieser Org"
-      />
-      {/* TODO: Zahlungsstatus, Plan dieser Org */}
-    </div>
-  )
-}
+import { ReceiptText } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function OrganizationBillingPage() { return <CapabilityPage icon={ReceiptText} title="Abrechnung" description="Plan, Nutzung und Zahlungsstatus einer Organisation." noticeTitle="Abrechnung wird vorbereitet" noticeDescription="Abrechnungsdaten erscheinen erst, wenn ein angebundener Provider verlässliche Daten liefert." />; }

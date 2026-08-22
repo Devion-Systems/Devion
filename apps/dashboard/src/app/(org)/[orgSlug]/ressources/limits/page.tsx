@@ -1,3 +1,2 @@
-export default function ResourceLimitsPage() {
-  return <div className="p-6 text-sm text-muted-foreground">Ressourcenlimits werden vorbereitet.</div>;
-}
+import { redirect } from "next/navigation";
+export default async function LegacyLimitsPage({ params }: { params: Promise<{ orgSlug: string }> }) { const { orgSlug } = await params; redirect(`/${orgSlug}/resources/limits`); }

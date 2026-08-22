@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminSettingsFeatureFlagsPage() {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Feature Flags"
-        description="Globale Feature-Flags verwalten"
-      />
-      {/* TODO: Globale Feature-Flags verwalten */}
-    </div>
-  )
-}
+import { Flag } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function FeatureFlagsPage() { return <CapabilityPage icon={Flag} title="Feature Flags" description="Funktionen kontrolliert für Organisationen aktivieren." noticeTitle="Feature-Flag-Verwaltung wird vorbereitet" noticeDescription="Flags werden erst editierbar, wenn Rollout und Audit-Log serverseitig durchgesetzt werden." />; }

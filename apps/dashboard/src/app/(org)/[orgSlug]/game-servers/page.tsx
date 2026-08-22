@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Gamepad2, Play, Plus, Send, Square, Terminal, Trash2 } from "lucide-react";
+import { CircleAlert, Gamepad2, LoaderCircle, Play, Plus, Send, Square, Terminal, Trash2 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
+import { DesignEmptyState } from "@/components/layout/design-empty-state";
 import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
 import { Button } from "@/components/ui/button";
 
@@ -49,6 +50,15 @@ const minecraftVersions = [
   "1.16.5",
 ];
 
+async function responseMessage(response: Response, fallback: string) {
+  try {
+    const body = await response.json() as { error?: string };
+    return body.error ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function GameServersPage() {
   const { orgSlug } = useParams<{ orgSlug: string }>();
   const client = useQueryClient();
@@ -66,6 +76,8 @@ export default function GameServersPage() {
   const [fileContent, setFileContent] = useState("");
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Server | null>(null);
   const servers = useQuery<Server[]>({
     queryKey: ["org", orgSlug, "game-servers"],
     queryFn: async () => {
@@ -126,10 +138,11 @@ export default function GameServersPage() {
           }),
         },
       );
-      if (!response.ok) throw new Error("Server konnte nicht erstellt werden");
+      if (!response.ok) throw new Error(await responseMessage(response, "Server konnte nicht erstellt werden"));
     },
     onSuccess: () => {
       setName("");
+      setNotice("Der Server wird bereitgestellt.");
       refresh();
     },
   });
@@ -150,9 +163,13 @@ export default function GameServersPage() {
           credentials: "include",
         },
       );
-      if (!response.ok) throw new Error("Aktion fehlgeschlagen");
+      if (!response.ok) throw new Error(await responseMessage(response, "Aktion fehlgeschlagen"));
     },
-    onSuccess: refresh,
+    onSuccess: (_, input) => {
+      setNotice(input.method === "start" ? "Der Server wird gestartet." : input.method === "stop" ? "Der Server wird gestoppt." : "Der Server wurde gelöscht.");
+      if (input.method === "delete" && selectedServerId === input.server.id) setSelectedServerId(null);
+      refresh();
+    },
   });
   const consoleData = useQuery<ConsoleData>({
     queryKey: ["org", orgSlug, "game-servers", selectedServerId, "console"],
@@ -199,6 +216,7 @@ export default function GameServersPage() {
     onSuccess: (result) => {
       setLastCommandId(result.commandId);
       setConsoleCommand("");
+      setNotice("Konsolenbefehl wurde an den Node-Agent gesendet.");
       void consoleData.refetch();
     },
   });
@@ -279,6 +297,12 @@ export default function GameServersPage() {
         title="Game Server"
         description="Minecraft-Java-Server mit Konsole, Dateien und rollenbasiertem Zugriff."
       />
+      {notice ? (
+        <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} className="rounded px-2 py-1 text-xs font-medium hover:bg-emerald-400/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200">Schließen</button>
+        </div>
+      ) : null}
       <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
         <div className="mb-4">
           <h2 className="font-medium text-zinc-100">Neuen Server erstellen</h2>
@@ -297,17 +321,23 @@ export default function GameServersPage() {
             </option>
           ))}
         </select>
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Mein Minecraft-Server"
-          className="h-9 min-w-56 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100"
-        />
+        <label className="min-w-56 flex-1 text-sm text-zinc-300">
+          <span className="mb-1 block">Servername</span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Mein Minecraft-Server"
+            aria-invalid={name.length > 80}
+            className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
+          />
+          {name.length > 80 ? <span className="mt-1 flex items-center gap-1 text-xs text-red-300"><CircleAlert className="size-3" />Maximal 80 Zeichen</span> : null}
+        </label>
         <input
           value={version}
           onChange={(event) => setVersion(event.target.value)}
           list="minecraft-versions"
-          className="h-9 w-32 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100"
+          aria-label="Minecraft-Version"
+          className="h-10 w-36 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
         />
         <datalist id="minecraft-versions">
           {minecraftVersions.map((minecraftVersion) => (
@@ -315,11 +345,12 @@ export default function GameServersPage() {
           ))}
         </datalist>
         <Button
-          disabled={!name || !projectId || create.isPending}
+          className="h-10"
+          disabled={!name.trim() || name.length > 80 || !projectId || create.isPending}
           onClick={() => create.mutate()}
         >
-          <Plus className="mr-1 size-3.5" />
-          Server erstellen
+          {create.isPending ? <LoaderCircle className="mr-1 size-3.5 animate-spin" /> : <Plus className="mr-1 size-3.5" />}
+          {create.isPending ? "Erstellt ..." : "Server erstellen"}
         </Button>
         </div>
         {create.error ? <p className="mt-3 text-sm text-red-300">{create.error.message}</p> : null}
@@ -327,7 +358,7 @@ export default function GameServersPage() {
       {servers.isLoading ? (
         <p className="text-sm text-zinc-500">Server werden geladen …</p>
       ) : null}
-      {servers.isError ? <p className="rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{servers.error.message}</p> : null}
+      {servers.isError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200"><span>{servers.error.message}</span><Button size="sm" variant="outline" className="min-h-10" onClick={() => void servers.refetch()}>Erneut versuchen</Button></div> : null}
       {action.error ? <p className="rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{action.error.message}</p> : null}
       <div className="grid gap-3 lg:grid-cols-2">
         {(servers.data ?? []).map((server) => (
@@ -350,10 +381,11 @@ export default function GameServersPage() {
                 status={server.status === "running" ? "healthy" : server.status}
               />
             </div>
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
+                className="min-h-10"
                 disabled={server.status === "running" || action.isPending}
                 onClick={() => action.mutate({ server, method: "start" })}
               >
@@ -363,6 +395,7 @@ export default function GameServersPage() {
               <Button
                 size="sm"
                 variant="outline"
+                className="min-h-10"
                 disabled={server.status !== "running" || action.isPending}
                 onClick={() => action.mutate({ server, method: "stop" })}
               >
@@ -372,6 +405,7 @@ export default function GameServersPage() {
               <Button
                 size="sm"
                 variant="outline"
+                className="min-h-10"
                 onClick={() => {
                   setSelectedServerId(server.id);
                   setLastCommandId(null);
@@ -384,9 +418,9 @@ export default function GameServersPage() {
               <Button
                 size="sm"
                 variant="ghost"
+                className="min-h-10"
                 onClick={() => {
-                  if (confirm(`${server.name} samt Spielwelt löschen?`))
-                    action.mutate({ server, method: "delete" });
+                  setPendingDelete(server);
                 }}
               >
                 <Trash2 className="mr-1 size-3.5" />
@@ -396,12 +430,7 @@ export default function GameServersPage() {
           </section>
         ))}
       </div>
-      {!servers.isLoading && !servers.isError && (servers.data?.length ?? 0) === 0 ? (
-        <div className="rounded-2xl border border-dashed border-white/[0.14] p-10 text-center">
-          <Gamepad2 className="mx-auto size-7 text-zinc-500" />
-          <p className="mt-3 text-sm text-zinc-400">Noch keine Minecraft-Server vorhanden.</p>
-        </div>
-      ) : null}
+      {!servers.isLoading && !servers.isError && (servers.data?.length ?? 0) === 0 ? <DesignEmptyState icon={Gamepad2} title="Noch keine Minecraft-Server" description="Erstelle den ersten Server und ordne ihn einem Projekt zu." detail="Der Server wird anschließend automatisch auf einem passenden Node bereitgestellt." /> : null}
       {selectedServer ? (
         <section className="rounded-2xl border border-[#81ecec]/30 bg-[#172128] p-5 shadow-2xl shadow-black/20">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -488,6 +517,23 @@ export default function GameServersPage() {
             </div>
           </div>
         </section>
+      ) : null}
+      {pendingDelete ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" role="presentation">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-server-title" aria-describedby="delete-server-description" className="w-full max-w-md rounded-2xl border border-red-400/30 bg-[#172128] p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <CircleAlert className="mt-0.5 size-5 shrink-0 text-red-300" aria-hidden="true" />
+              <div className="min-w-0">
+                <h2 id="delete-server-title" className="font-semibold text-zinc-100">Server löschen?</h2>
+                <p id="delete-server-description" className="mt-2 text-sm leading-6 text-zinc-400">{pendingDelete.name} und die zugehörige Spielwelt werden dauerhaft entfernt. Diese Aktion kann nicht rückgängig gemacht werden.</p>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" className="min-h-11" disabled={action.isPending} onClick={() => setPendingDelete(null)}>Abbrechen</Button>
+              <Button variant="destructive" className="min-h-11" disabled={action.isPending} onClick={() => action.mutate({ server: pendingDelete, method: "delete" }, { onSuccess: () => setPendingDelete(null) })}>{action.isPending ? "Löscht ..." : "Endgültig löschen"}</Button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );

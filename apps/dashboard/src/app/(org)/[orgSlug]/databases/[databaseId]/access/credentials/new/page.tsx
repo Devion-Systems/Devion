@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function DatabasesDetailAccessCredentialsNewPage({ params }: { params: { orgSlug: string, databaseId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Neuer Zugang"
-        description="Neuen DB-User/Read-Replica-Zugang anlegen"
-      />
-      {/* TODO: Neuen DB-User/Read-Replica-Zugang anlegen */}
-    </div>
-  )
-}
+import { KeyRound } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function NewDatabaseCredentialPage() { return <CapabilityPage icon={KeyRound} title="Datenbankzugang erstellen" description="Einen eingeschränkten Zugang für ein Projekt oder einen Dienst erstellen." noticeTitle="Zugangserstellung noch nicht verfügbar" noticeDescription="Dieser Flow wird erst aktiviert, wenn die sichere Secret-Auslieferung vollständig implementiert ist." />; }

@@ -1,3 +1,2 @@
-export default function NewSharedResourcePage() {
-  return <div className="p-6 text-sm text-muted-foreground">Geteilte Ressource wird vorbereitet.</div>;
-}
+import { redirect } from "next/navigation";
+export default async function LegacyNewSharedPage({ params }: { params: Promise<{ orgSlug: string }> }) { const { orgSlug } = await params; redirect(`/${orgSlug}/resources/shared/new`); }

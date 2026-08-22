@@ -1,3 +1,2 @@
-export default function ResourceUsagePage() {
-  return <div className="p-6 text-sm text-muted-foreground">Ressourcennutzung wird vorbereitet.</div>;
-}
+import { redirect } from "next/navigation";
+export default async function LegacyUsagePage({ params }: { params: Promise<{ orgSlug: string }> }) { const { orgSlug } = await params; redirect(`/${orgSlug}/resources/usage`); }

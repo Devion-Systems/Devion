@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminOrganizationsDetailMembersPage({ params }: { params: { orgId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Org-Mitglieder (Admin)"
-        description="Mitgliederliste dieser Org aus Admin-Sicht"
-      />
-      {/* TODO: Mitgliederliste dieser Org aus Admin-Sicht */}
-    </div>
-  )
-}
+import { UsersRound } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function AdminOrganizationMembersPage() { return <CapabilityPage icon={UsersRound} title="Organisationsmitglieder" description="Mitglieder, Teams und Rollen aus Plattformperspektive prüfen." noticeTitle="Admin-Mitgliederansicht wird vorbereitet" noticeDescription="Diese Ansicht wird freigeschaltet, wenn organisationsübergreifende Zugriffe vollständig auditiert sind." />; }

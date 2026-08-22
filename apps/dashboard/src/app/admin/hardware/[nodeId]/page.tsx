@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminHardwareDetailPage({ params }: { params: { nodeId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Node-Detail (Admin)"
-        description="Plattformweite Node-Verwaltung"
-      />
-      {/* TODO: Plattformweite Node-Verwaltung */}
-    </div>
-  )
-}
+import { ServerCog } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function AdminNodePage() { return <CapabilityPage icon={ServerCog} title="Plattform-Node" description="Plattformweite Detailansicht eines Nodes." noticeTitle="Admin-Node-Verwaltung wird vorbereitet" noticeDescription="Die organisationsübergreifende Ansicht wird erst freigeschaltet, wenn die Zuständigkeiten sicher getrennt sind." />; }

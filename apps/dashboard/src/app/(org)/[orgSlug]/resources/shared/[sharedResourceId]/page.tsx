@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function ResourcesSharedDetailPage({ params }: { params: { orgSlug: string, sharedResourceId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Freigabe-Detail"
-        description="AccessGrantList — wer hat aktuell Zugriff"
-      />
-      {/* TODO: AccessGrantList — wer hat aktuell Zugriff */}
-    </div>
-  )
-}
+import { Share2 } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function SharedResourceDetailPage() { return <CapabilityPage icon={Share2} title="Geteilte Ressource" description="Details, Ownership und Zugriffsrechte einer geteilten Ressource." noticeTitle="Details noch nicht verfügbar" noticeDescription="Diese Ansicht wird aktiviert, sobald der Ressourcenservice echte Freigaben liefert." />; }

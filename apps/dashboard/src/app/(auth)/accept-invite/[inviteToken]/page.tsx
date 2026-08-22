@@ -1,12 +1,3 @@
-'use client'
-
-
-
-export default function AcceptInviteDetailPage({ params }: { params: { inviteToken: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-  
-      {/* TODO: Lädt Invite-Details, zeigt Org/Team-Namen, Annehmen-Button */}
-    </div>
-  )
-}
+import { MailCheck } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function AcceptInvitePage() { return <CapabilityPage icon={MailCheck} title="Einladung annehmen" description="Einladungen zu Organisationen und Teams sicher prüfen und annehmen." noticeTitle="Einladungsdetails werden vorbereitet" noticeDescription="Der Flow wird aktiviert, sobald Einladungen mit Ablauf, Organisation und Team vollständig verifiziert angezeigt werden können." />; }

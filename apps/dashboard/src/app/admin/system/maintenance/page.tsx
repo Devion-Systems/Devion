@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function AdminSystemMaintenancePage() {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Wartung"
-        description="Wartungsfenster planen und ankündigen"
-      />
-      {/* TODO: Wartungsfenster planen und ankündigen */}
-    </div>
-  )
-}
+import { Wrench } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function MaintenancePage() { return <CapabilityPage icon={Wrench} title="Wartungsfenster" description="Geplante Wartungen erstellen und transparent ankündigen." noticeTitle="Wartungsplanung wird vorbereitet" noticeDescription="Wartungsfenster werden erst aktiviert, wenn Benachrichtigungen und Audit-Protokollierung bereitstehen." />; }

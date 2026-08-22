@@ -1,15 +1,23 @@
-'use client'
+"use client";
 
-import { PageHeader } from '@/components/layout/page-header'
+import { useQuery } from "@tanstack/react-query";
+import { Boxes, Cpu, HardDrive, MemoryStick, Settings2 } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { PageHeader } from "@/components/layout/page-header";
+import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
+import { Button } from "@/components/ui/button";
 
-export default function HardwareDetailPage({ params }: { params: { orgSlug: string, nodeId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Node-Detail"
-        description="Status, Specs, NodeHealthBadge"
-      />
-      {/* TODO: Status, Specs, NodeHealthBadge */}
-    </div>
-  )
+type Quantity = { capacity: number; allocatable: number; reserved: number; usage: number };
+type NodeDetail = { id: string; name: string; hostname: string; status: string; architecture: string; os: string; region: string | null; agentVersion: string; runtimes: string[]; capabilities: string[]; labels: Record<string, string>; schedulingEnabled: boolean; lastHeartbeatAt: string | null; resources: { cpuMilli: Quantity; memoryMib: Quantity; storageMib: Quantity } | null; assignments: unknown[] };
+const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
+function Amount({ icon: Icon, label, value, suffix }: { icon: typeof Cpu; label: string; value: Quantity | undefined; suffix: string }) { return <div className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><Icon className="size-4 text-[#81ecec]" /><p className="mt-3 text-xs text-zinc-500">{label}</p><p className="mt-1 text-lg font-medium text-zinc-100">{value ? `${value.usage} / ${value.capacity}` : "–"}<span className="ml-1 text-xs font-normal text-zinc-500">{suffix}</span></p></div>; }
+
+export default function HardwareDetailPage() {
+  const { orgSlug, nodeId } = useParams<{ orgSlug: string; nodeId: string }>();
+  const node = useQuery<NodeDetail>({ queryKey: ["org", orgSlug, "node", nodeId], queryFn: async () => { const response = await fetch(api(`/organizations/${orgSlug}/nodes/${nodeId}`), { credentials: "include" }); if (!response.ok) throw new Error("Node konnte nicht geladen werden"); return response.json(); } });
+  if (node.isLoading) return <div className="space-y-6 p-6"><div className="h-10 w-64 animate-pulse rounded bg-white/[0.06]" /><div className="h-72 animate-pulse rounded-2xl bg-white/[0.05]" /></div>;
+  if (node.isError || !node.data) return <div className="space-y-6 p-6"><PageHeader title="Node nicht verfügbar" description={node.error?.message ?? "Der Node wurde nicht gefunden."} /><Button onClick={() => void node.refetch()}>Erneut versuchen</Button></div>;
+  const data = node.data;
+  return <div className="space-y-6 p-6"><div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title={data.name} description={`${data.hostname} · Agent ${data.agentVersion}`} /><ResourceStatusBadge status={data.status} /></div><div className="flex flex-wrap gap-2 border-b border-white/[0.08] pb-3"><Button asChild size="sm" variant="secondary"><Link href={`/${orgSlug}/hardware/${nodeId}`}>Übersicht</Link></Button><Button asChild size="sm" variant="ghost"><Link href={`/${orgSlug}/hardware/${nodeId}/resources`}>Ressourcen</Link></Button><Button asChild size="sm" variant="ghost"><Link href={`/${orgSlug}/hardware/${nodeId}/assignments`}>Workloads ({data.assignments.length})</Link></Button><Button asChild size="sm" variant="ghost"><Link href={`/${orgSlug}/hardware/${nodeId}/settings`}><Settings2 className="size-3.5" />Einstellungen</Link></Button></div><section className="grid gap-4 md:grid-cols-3"><Amount icon={Cpu} label="CPU" value={data.resources?.cpuMilli} suffix="m" /><Amount icon={MemoryStick} label="Arbeitsspeicher" value={data.resources?.memoryMib} suffix="MiB" /><Amount icon={HardDrive} label="Speicher" value={data.resources?.storageMib} suffix="MiB" /></section><section className="grid gap-4 lg:grid-cols-2"><div className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5"><h2 className="font-medium text-zinc-100">Node-Informationen</h2><dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"><dt className="text-zinc-500">Region</dt><dd className="truncate text-zinc-200">{data.region ?? "Nicht gesetzt"}</dd><dt className="text-zinc-500">Scheduling</dt><dd className="text-zinc-200">{data.schedulingEnabled ? "Aktiv" : "Pausiert"}</dd><dt className="text-zinc-500">Runtimes</dt><dd className="text-zinc-200">{data.runtimes.join(", ") || "–"}</dd><dt className="text-zinc-500">Letzter Heartbeat</dt><dd className="text-zinc-200">{data.lastHeartbeatAt ? new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(data.lastHeartbeatAt)) : "Noch keiner"}</dd></dl></div><div className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5"><h2 className="flex items-center gap-2 font-medium text-zinc-100"><Boxes className="size-4 text-[#81ecec]" />Labels und Fähigkeiten</h2><div className="mt-4 flex flex-wrap gap-2">{Object.entries(data.labels).map(([key, value]) => <span key={key} className="rounded-lg bg-white/[0.06] px-2 py-1 font-mono text-xs text-zinc-300">{key}={value}</span>)}{data.capabilities.map((capability) => <span key={capability} className="rounded-lg bg-[#00cec9]/10 px-2 py-1 text-xs text-[#b8ffff]">{capability}</span>)}{Object.keys(data.labels).length === 0 && data.capabilities.length === 0 ? <p className="text-sm text-zinc-500">Keine Labels oder Fähigkeiten gemeldet.</p> : null}</div></div></section></div>;
 }

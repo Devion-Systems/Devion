@@ -1,15 +1,3 @@
-'use client'
-
-import { PageHeader } from '@/components/layout/page-header'
-
-export default function DatabasesDetailLogsPage({ params }: { params: { orgSlug: string, databaseId: string } }) {
-  return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Datenbank-Logs"
-        description="Connection-Errors, Slow-Query-Log"
-      />
-      {/* TODO: Connection-Errors, Slow-Query-Log */}
-    </div>
-  )
-}
+import { ScrollText } from "lucide-react";
+import { CapabilityPage } from "@/components/layout/capability-page";
+export default function DatabaseLogsPage() { return <CapabilityPage icon={ScrollText} title="Datenbank-Logs" description="Verbindungsfehler, Betriebsereignisse und langsame Abfragen." noticeTitle="Keine Datenbank-Logs verfügbar" noticeDescription="Logs erscheinen erst, wenn ein Agent sie mit Quelle, Zeitstempel und Zugriffskontrolle meldet." />; }
