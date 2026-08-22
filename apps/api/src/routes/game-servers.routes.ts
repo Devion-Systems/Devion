@@ -245,7 +245,12 @@ routes.post("/:orgSlug/game-servers/:serverId/stop", async (c) => {
       409,
     );
   await stopApplicationWorkloads(server.applicationId);
-  await db.update(gameServers).set({ status: "stopped" }).where(eq(gameServers.id, server.id));
+  // Docker assigns a new host port on every start. Never keep advertising a
+  // previous port while the workload is stopping or stopped.
+  await db
+    .update(gameServers)
+    .set({ status: "stopped", runtimePort: null })
+    .where(eq(gameServers.id, server.id));
   return c.json({ status: "stopping" }, 202);
 });
 
@@ -274,7 +279,10 @@ routes.post("/:orgSlug/game-servers/:serverId/start", async (c) => {
     .update(applications)
     .set({ imageName: minecraftRuntimeImage })
     .where(eq(applications.id, applicationId));
-  await db.update(gameServers).set({ status: "provisioning" }).where(eq(gameServers.id, server.id));
+  await db
+    .update(gameServers)
+    .set({ status: "provisioning", runtimePort: null })
+    .where(eq(gameServers.id, server.id));
   await reconcileDeployment(deploymentId);
   return c.json({ status: "starting" }, 202);
 });

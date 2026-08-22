@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Check, CircleAlert, Copy, Cpu, FileText, FolderTree, Gamepad2, HardDrive, LoaderCircle, MemoryStick, Network, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Terminal, Trash2, Wifi, X } from "lucide-react";
+import { Activity, Check, ChevronRight, CircleAlert, Copy, Cpu, File, FileText, Folder, FolderOpen, FolderTree, Gamepad2, HardDrive, LoaderCircle, MemoryStick, Network, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Terminal, Trash2, Wifi, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -35,6 +35,7 @@ type AccessGrant = {
 };
 type ConsoleData = { logs: string; updatedAt: string | null; status: string };
 type CommandResult = { status: string; output: string; error: string | null };
+type FileEntry = { kind: "d" | "f"; path: string; size: number };
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 type MinecraftVersion = { id: string; type: string; releaseTime: string };
 const fallbackMinecraftVersions: MinecraftVersion[] = [
@@ -71,6 +72,7 @@ export default function GameServersPage() {
   const [grantRole, setGrantRole] = useState<AccessGrant["role"]>("operator");
   const [managementTab, setManagementTab] = useState<"console" | "files" | "access">("console");
   const [fileEntries, setFileEntries] = useState<string[]>([]);
+  const [fileBrowserPath, setFileBrowserPath] = useState("");
   const [filePath, setFilePath] = useState("");
   const [fileContent, setFileContent] = useState("");
   const [fileBusy, setFileBusy] = useState(false);
@@ -148,6 +150,19 @@ export default function GameServersPage() {
     void client.invalidateQueries({
       queryKey: ["org", orgSlug, "game-servers"],
     });
+  const openManagement = (
+    serverId: string,
+    tab: "console" | "files" | "access" = "console",
+  ) => {
+    setSelectedServerId(serverId);
+    setLastCommandId(null);
+    setManagementTab(tab);
+    setFileEntries([]);
+    setFileBrowserPath("");
+    setFilePath("");
+    setFileContent("");
+    setFileError(null);
+  };
   const create = useMutation({
     mutationFn: async () => {
       const response = await fetch(
@@ -248,7 +263,7 @@ export default function GameServersPage() {
     },
   });
   const selectedServer = (servers.data ?? []).find((server) => server.id === selectedServerId);
-  const connectionAddress = selectedServer?.runtimePort
+  const connectionAddress = selectedServer?.status === "running" && selectedServer.runtimePort
     ? `${typeof window === "undefined" ? "server" : window.location.hostname}:${selectedServer.runtimePort}`
     : null;
   const copyConnectionAddress = async () => {
@@ -287,9 +302,63 @@ export default function GameServersPage() {
   };
   const openFile = async (path: string) => {
     setFilePath(path);
+    setFileContent("");
     const result = await runFileCommand("read", { path });
     if (typeof result?.content === "string") setFileContent(result.content);
   };
+  const fileBrowserEntries = fileEntries.flatMap((line): FileEntry[] => {
+    const [kind, path, size] = line.split("\t");
+    return (kind === "d" || kind === "f") && path ? [{ kind, path, size: Number(size) || 0 }] : [];
+  }).filter((entry) => {
+    const prefix = fileBrowserPath ? `${fileBrowserPath}/` : "";
+    if (!entry.path.startsWith(prefix)) return false;
+    return !entry.path.slice(prefix.length).includes("/");
+  });
+  const browserBreadcrumbs = fileBrowserPath ? fileBrowserPath.split("/") : [];
+  const fileManager = (
+    <div className="mt-4 grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside className="min-h-[28rem] overflow-hidden rounded-xl border border-white/[0.08] bg-[#080d10]">
+        <div className="border-b border-white/[0.08] px-3 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-100">Dateien</h3>
+              <p className="mt-0.5 text-xs text-zinc-500">Persistenter Serverordner</p>
+            </div>
+            <Button size="icon-xs" variant="ghost" aria-label="Dateiliste aktualisieren" disabled={fileBusy} onClick={() => void loadFiles()}>
+              <RefreshCw className={`size-3.5 ${fileBusy ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+          <nav aria-label="Aktueller Ordner" className="mt-3 flex min-w-0 items-center overflow-x-auto text-xs text-zinc-400">
+            <button type="button" onClick={() => setFileBrowserPath("")} className="shrink-0 rounded px-1 py-1 hover:bg-white/[0.08] hover:text-zinc-100">/data</button>
+            {browserBreadcrumbs.map((part, index) => {
+              const target = browserBreadcrumbs.slice(0, index + 1).join("/");
+              return <span key={target} className="flex shrink-0 items-center"><ChevronRight className="size-3 text-zinc-600" /><button type="button" onClick={() => setFileBrowserPath(target)} className="rounded px-1 py-1 hover:bg-white/[0.08] hover:text-zinc-100">{part}</button></span>;
+            })}
+          </nav>
+        </div>
+        <div className="max-h-[27rem] overflow-auto p-2">
+          {fileBrowserPath ? <button type="button" disabled={fileBusy} onClick={() => setFileBrowserPath(browserBreadcrumbs.slice(0, -1).join("/"))} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-100"><FolderOpen className="size-4 text-[#81ecec]" />..</button> : null}
+          {fileBrowserEntries.map((entry) => {
+            const label = entry.path.split("/").at(-1) ?? entry.path;
+            const selected = entry.kind === "f" && filePath === entry.path;
+            return <button type="button" key={entry.path} disabled={fileBusy} onClick={() => entry.kind === "d" ? setFileBrowserPath(entry.path) : void openFile(entry.path)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors hover:bg-white/[0.08] disabled:opacity-60 ${selected ? "bg-[#81ecec]/15 text-[#b8ffff]" : "text-zinc-300"}`}>
+              {entry.kind === "d" ? <Folder className="size-4 shrink-0 text-[#81ecec]" /> : <File className="size-4 shrink-0 text-zinc-500" />}<span className="min-w-0 flex-1 truncate">{label}</span>{entry.kind === "d" ? <ChevronRight className="size-3 shrink-0 text-zinc-600" /> : <span className="shrink-0 text-[10px] text-zinc-600">{entry.size < 1024 ? `${entry.size} B` : `${Math.ceil(entry.size / 1024)} KB`}</span>}
+            </button>;
+          })}
+          {!fileBusy && fileBrowserEntries.length === 0 ? <p className="px-2 py-8 text-center text-sm text-zinc-500">Dieser Ordner ist leer.</p> : null}
+        </div>
+      </aside>
+      <div className="min-w-0 rounded-xl border border-white/[0.08] bg-[#0b1217] p-3 sm:p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-white/[0.08] pb-3">
+          <div className="min-w-0"><h3 className="text-sm font-medium text-zinc-100">Editor</h3><p className="mt-1 truncate font-mono text-xs text-zinc-500">{filePath ? `/data/${filePath}` : "Wähle links eine Datei aus."}</p></div>
+          {filePath ? <span className="rounded bg-white/[0.06] px-2 py-1 font-mono text-[11px] text-zinc-400">Textdatei</span> : null}
+        </div>
+        <textarea value={fileContent} onChange={(event) => setFileContent(event.target.value)} disabled={!filePath || fileBusy} aria-label="Dateiinhalt" className="mt-3 h-[24rem] w-full resize-y rounded-lg border border-white/[0.1] bg-[#080d10] p-3 font-mono text-xs leading-5 text-zinc-100 outline-none focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30 disabled:cursor-not-allowed disabled:opacity-60" placeholder="Wähle links eine Datei aus, um sie zu bearbeiten." />
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">Speichern schreibt die Änderung direkt in die persistente Spielwelt.</p><Button size="sm" disabled={!filePath || fileBusy} onClick={async () => { const result = await runFileCommand("write", { path: filePath, content: fileContent }); if (result !== null) { setNotice("Datei wurde gespeichert."); await loadFiles(); } }}>{fileBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}Speichern</Button></div>
+        {fileError ? <p role="alert" className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200">{fileError}</p> : null}
+      </div>
+    </div>
+  );
   const grants = useQuery<AccessGrant[]>({
     queryKey: ["org", orgSlug, "game-servers", selectedServerId, "access"],
     enabled: Boolean(selectedServerId),
@@ -449,9 +518,7 @@ export default function GameServersPage() {
                 variant="outline"
                 className="min-h-10"
                 onClick={() => {
-                  setSelectedServerId(server.id);
-                  setLastCommandId(null);
-                  setManagementTab("console");
+                  openManagement(server.id);
                 }}
               >
                 <Terminal className="mr-1 size-3.5" />
@@ -531,21 +598,7 @@ export default function GameServersPage() {
             </Button>
           </form>
           {command.error ? <p className="mt-2 text-sm text-red-300">{command.error.message}</p> : null}
-          </> : managementTab === "files" ? <div className="mt-4 grid gap-4 lg:grid-cols-[20rem_1fr]">
-            <aside className="max-h-[32rem] overflow-auto rounded-xl bg-[#080d10] p-3 font-mono text-xs text-zinc-300">
-              <div className="mb-3 flex items-center justify-between border-b border-white/[0.08] pb-2 font-sans"><span className="font-medium text-zinc-100">/data</span><Button size="sm" variant="ghost" disabled={fileBusy} onClick={() => void loadFiles()}>Aktualisieren</Button></div>
-              {fileEntries.map((entry) => {
-                const [kind, path] = entry.split("\t");
-                return <button type="button" key={entry} disabled={kind !== "f" || fileBusy} onClick={() => path && void openFile(path)} style={{ paddingLeft: `${Math.min((path?.split("/").length ?? 1) - 1, 5) * 12 + 8}px` }} className={`block w-full truncate rounded py-1.5 text-left hover:bg-white/[0.08] disabled:opacity-60 ${filePath === path ? "bg-[#81ecec]/15 text-[#b8ffff]" : ""}`}>{kind === "d" ? "▸ " : "• "}{path?.split("/").at(-1)}</button>;
-              })}
-              {!fileBusy && fileEntries.length === 0 ? <p className="px-2 py-4 font-sans text-sm text-zinc-500">Keine Dateien geladen.</p> : null}
-            </aside>
-            <div>
-              <div className="mb-2 font-mono text-xs text-zinc-500">{filePath ? `/data/${filePath}` : "Datei auswaehlen"}</div>
-              <textarea value={fileContent} onChange={(event) => setFileContent(event.target.value)} disabled={!filePath || fileBusy} className="h-[26rem] w-full resize-y rounded-xl border border-white/[0.1] bg-[#080d10] p-3 font-mono text-xs text-zinc-100" placeholder="Datei aus dem Baum auswaehlen" />
-              <div className="mt-2 flex items-center gap-3"><Button size="sm" disabled={!filePath || fileBusy} onClick={async () => { const result = await runFileCommand("write", { path: filePath, content: fileContent }); if (result !== null) await loadFiles(); }}>Speichern</Button>{fileError ? <span className="text-xs text-red-300">{fileError}</span> : null}</div>
-            </div>
-          </div> : null}
+          </> : managementTab === "files" ? fileManager : null}
           {managementTab === "access" ? <div className="mt-6 border-t border-white/[0.08] pt-5">
             <h3 className="font-medium text-zinc-100">Server-Rollen</h3>
             <p className="mt-1 text-xs text-zinc-500">Viewer sehen Logs, Operatoren steuern Server und Konsole, Admins verwalten diese Zugriffe.</p>
