@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Gamepad2, LoaderCircle, Play, Plus, Send, Square, Terminal, Trash2 } from "lucide-react";
+import { Activity, CircleAlert, Cpu, FileText, FolderTree, Gamepad2, HardDrive, LoaderCircle, MemoryStick, Network, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Terminal, Trash2, Wifi, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -72,7 +72,7 @@ export default function GameServersPage() {
   const [lastCommandId, setLastCommandId] = useState<string | null>(null);
   const [grantTarget, setGrantTarget] = useState("");
   const [grantRole, setGrantRole] = useState<AccessGrant["role"]>("operator");
-  const [managementTab, setManagementTab] = useState<"console" | "files">("console");
+  const [managementTab, setManagementTab] = useState<"console" | "files" | "access">("console");
   const [fileEntries, setFileEntries] = useState<string[]>([]);
   const [filePath, setFilePath] = useState("");
   const [fileContent, setFileContent] = useState("");
@@ -456,21 +456,34 @@ export default function GameServersPage() {
       </div>
       {!servers.isLoading && !servers.isError && (servers.data?.length ?? 0) === 0 ? <DesignEmptyState icon={Gamepad2} title="Noch keine Minecraft-Server" description="Erstelle den ersten Server und ordne ihn einem Projekt zu." detail="Der Server wird anschließend automatisch auf einem passenden Node bereitgestellt." /> : null}
       {selectedServer ? (
-        <section className="rounded-2xl border border-[#81ecec]/30 bg-[#172128] p-5 shadow-2xl shadow-black/20">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-medium text-zinc-100">Management: {selectedServer.name}</h2>
-              <p className="mt-1 text-xs text-zinc-500">
-                Live-Logs werden alle 2,5 Sekunden aktualisiert. Befehle werden sicher ueber RCON ausgefuehrt.
-              </p>
+        <section className="overflow-hidden rounded-2xl border border-[#81ecec]/30 bg-[#172128] shadow-2xl shadow-black/20">
+          <header className="border-b border-white/[0.08] bg-[#121c22] px-5 py-5 sm:px-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate text-xl font-semibold text-zinc-50">{selectedServer.name}</h2>
+                  <ResourceStatusBadge status={selectedServer.status === "running" ? "healthy" : selectedServer.status} />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-400">
+                  <span className="rounded-md bg-white/[0.06] px-2 py-1">Minecraft Java {selectedServer.version}</span>
+                  <span className="rounded-md bg-white/[0.06] px-2 py-1">{selectedServer.runtimePort ? `Port ${selectedServer.runtimePort}` : "Port wird zugewiesen"}</span>
+                  <span className="rounded-md bg-white/[0.06] px-2 py-1">Lokale Devion-Hardware</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" className="min-h-10" disabled={selectedServer.status === "running" || action.isPending} onClick={() => action.mutate({ server: selectedServer, method: "start" })}><Play className="size-3.5" />Starten</Button>
+                <Button size="sm" variant="outline" className="min-h-10" disabled={selectedServer.status !== "running" || action.isPending} onClick={() => action.mutate({ server: selectedServer, method: "stop" })}><Square className="size-3.5" />Stoppen</Button>
+                <Button size="icon" variant="ghost" aria-label="Serverstatus aktualisieren" className="min-h-10 min-w-10" onClick={() => void servers.refetch()}><RefreshCw className="size-4" /></Button>
+                <Button size="icon" variant="ghost" aria-label="Management schliessen" className="min-h-10 min-w-10" onClick={() => setSelectedServerId(null)}><X className="size-4" /></Button>
+              </div>
             </div>
-            <Button size="sm" variant="ghost" onClick={() => setSelectedServerId(null)}>
-              Schliessen
-            </Button>
-          </div>
-          <div className="mt-4 flex gap-2 border-b border-white/[0.08] pb-3" role="tablist" aria-label="Server Management">
-            <Button size="sm" role="tab" aria-selected={managementTab === "console"} variant={managementTab === "console" ? "default" : "ghost"} onClick={() => setManagementTab("console")}>Konsole</Button>
-            <Button size="sm" role="tab" aria-selected={managementTab === "files"} variant={managementTab === "files" ? "default" : "ghost"} onClick={() => { setManagementTab("files"); void loadFiles(); }}>Dateien</Button>
+          </header>
+          <div className="grid xl:grid-cols-[minmax(0,1fr)_19rem]">
+            <main className="min-w-0 p-5 sm:p-6">
+          <div className="flex flex-wrap gap-1 border-b border-white/[0.08] pb-3" role="tablist" aria-label="Server Management">
+            <Button size="sm" role="tab" aria-selected={managementTab === "console"} variant={managementTab === "console" ? "default" : "ghost"} onClick={() => setManagementTab("console")}><Terminal className="size-3.5" />Konsole</Button>
+            <Button size="sm" role="tab" aria-selected={managementTab === "files"} variant={managementTab === "files" ? "default" : "ghost"} onClick={() => { setManagementTab("files"); void loadFiles(); }}><FolderTree className="size-3.5" />Dateien</Button>
+            <Button size="sm" role="tab" aria-selected={managementTab === "access"} variant={managementTab === "access" ? "default" : "ghost"} onClick={() => setManagementTab("access")}><ShieldCheck className="size-3.5" />Zugriff</Button>
           </div>
           {managementTab === "console" ? <>
           <pre className="mt-4 max-h-[32rem] overflow-auto rounded-xl bg-[#080d10] p-4 font-mono text-xs leading-5 text-emerald-200">
@@ -500,7 +513,7 @@ export default function GameServersPage() {
             </Button>
           </form>
           {command.error ? <p className="mt-2 text-sm text-red-300">{command.error.message}</p> : null}
-          </> : <div className="mt-4 grid gap-4 lg:grid-cols-[20rem_1fr]">
+          </> : managementTab === "files" ? <div className="mt-4 grid gap-4 lg:grid-cols-[20rem_1fr]">
             <aside className="max-h-[32rem] overflow-auto rounded-xl bg-[#080d10] p-3 font-mono text-xs text-zinc-300">
               <div className="mb-3 flex items-center justify-between border-b border-white/[0.08] pb-2 font-sans"><span className="font-medium text-zinc-100">/data</span><Button size="sm" variant="ghost" disabled={fileBusy} onClick={() => void loadFiles()}>Aktualisieren</Button></div>
               {fileEntries.map((entry) => {
@@ -514,8 +527,8 @@ export default function GameServersPage() {
               <textarea value={fileContent} onChange={(event) => setFileContent(event.target.value)} disabled={!filePath || fileBusy} className="h-[26rem] w-full resize-y rounded-xl border border-white/[0.1] bg-[#080d10] p-3 font-mono text-xs text-zinc-100" placeholder="Datei aus dem Baum auswaehlen" />
               <div className="mt-2 flex items-center gap-3"><Button size="sm" disabled={!filePath || fileBusy} onClick={async () => { const result = await runFileCommand("write", { path: filePath, content: fileContent }); if (result !== null) await loadFiles(); }}>Speichern</Button>{fileError ? <span className="text-xs text-red-300">{fileError}</span> : null}</div>
             </div>
-          </div>}
-          <div className="mt-6 border-t border-white/[0.08] pt-5">
+          </div> : null}
+          {managementTab === "access" ? <div className="mt-6 border-t border-white/[0.08] pt-5">
             <h3 className="font-medium text-zinc-100">Server-Rollen</h3>
             <p className="mt-1 text-xs text-zinc-500">Viewer sehen Logs, Operatoren steuern Server und Konsole, Admins verwalten diese Zugriffe.</p>
             {grants.isError ? <p className="mt-3 text-sm text-zinc-500">Die Rollenliste ist nur für Server-Admins sichtbar.</p> : null}
@@ -539,6 +552,28 @@ export default function GameServersPage() {
                 </div>
               ))}
             </div>
+          </div> : null}
+            </main>
+            <aside className="border-t border-white/[0.08] bg-[#10191f] p-5 xl:border-t-0 xl:border-l">
+              <h3 className="text-sm font-semibold text-zinc-100">Serverstatus</h3>
+              <div className="mt-4 space-y-4 text-sm">
+                <div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-zinc-500"><Wifi className="size-3.5" />Adresse</span><span className="max-w-36 truncate font-mono text-xs text-zinc-200">{selectedServer.runtimePort ? `:${selectedServer.runtimePort}` : "Nach Start verfügbar"}</span></div>
+                <div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-zinc-500"><Activity className="size-3.5" />Zustand</span><ResourceStatusBadge status={selectedServer.status === "running" ? "healthy" : selectedServer.status} /></div>
+                <div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-zinc-500"><Network className="size-3.5" />Runtime</span><span className="text-xs text-zinc-200">Docker lokal</span></div>
+              </div>
+              <div className="mt-6 border-t border-white/[0.08] pt-5">
+                <h3 className="text-sm font-semibold text-zinc-100">Ressourcen</h3>
+                <div className="mt-4 space-y-4">
+                  <div><div className="flex items-center justify-between text-xs text-zinc-400"><span className="inline-flex items-center gap-2"><Cpu className="size-3.5" />CPU</span><span>Agent-gesteuert</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/4 rounded-full bg-[#81ecec]" /></div></div>
+                  <div><div className="flex items-center justify-between text-xs text-zinc-400"><span className="inline-flex items-center gap-2"><MemoryStick className="size-3.5" />Arbeitsspeicher</span><span>{selectedServer.memoryMib} MiB</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full w-1/2 rounded-full bg-[#00cec9]" /></div></div>
+                  <div><div className="flex items-center justify-between text-xs text-zinc-400"><span className="inline-flex items-center gap-2"><HardDrive className="size-3.5" />Spielwelt</span><span>/data</span></div><p className="mt-1 text-[11px] text-zinc-600">Persistent gespeichert</p></div>
+                </div>
+              </div>
+              <div className="mt-6 border-t border-white/[0.08] pt-5">
+                <h3 className="text-sm font-semibold text-zinc-100">Schnellaktionen</h3>
+                <div className="mt-3 grid gap-2"><Button size="sm" variant="outline" className="justify-start" onClick={() => { setManagementTab("files"); void loadFiles(); }}><FileText className="size-3.5" />Dateien öffnen</Button><Button size="sm" variant="destructive" className="justify-start" onClick={() => setPendingDelete(selectedServer)}><Trash2 className="size-3.5" />Server löschen</Button></div>
+              </div>
+            </aside>
           </div>
         </section>
       ) : null}
