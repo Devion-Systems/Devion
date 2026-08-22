@@ -4,7 +4,8 @@
 node_modules
 .pnp
 .pnp.js
-
+.agents
+skills-lock.json
 # Local env files
 .env
 .env.local
