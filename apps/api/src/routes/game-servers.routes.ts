@@ -471,8 +471,14 @@ routes.delete("/:orgSlug/game-servers/:serverId", async (c) => {
   });
   if (server && !(await hasServerRole(server.id, access, "admin")))
     return c.json({ error: "Server admin role required" }, 403);
-  if (!server?.applicationId)
-    return c.json({ error: "Legacy game servers must be migrated before deletion" }, 409);
+  if (!server) return c.json({ error: "Game server not found" }, 404);
+  // Legacy records predate workloads and cannot have a live container or
+  // persistent world managed by Devion. They must remain removable so users
+  // can replace them with an actual deployable server.
+  if (!server.applicationId) {
+    await db.delete(gameServers).where(eq(gameServers.id, server.id));
+    return c.body(null, 204);
+  }
   const active = await db
     .select({ id: workloads.id })
     .from(workloads)
