@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   applications,
   agentCommands,
@@ -49,6 +50,27 @@ const accessInput = z.object({
 });
 const accessRoleRank = { viewer: 1, operator: 2, admin: 3 } as const;
 type ServerAccessRole = keyof typeof accessRoleRank;
+
+// Current Minecraft releases require Java 25. Keeping this explicit makes the
+// runtime stable even when the upstream `latest` image changes its Java line.
+const minecraftRuntimeImage = "itzg/minecraft-server:java25";
+
+function withRconEnabled(runtimeConfig: unknown) {
+  const current = runtimeConfig && typeof runtimeConfig === "object" && !Array.isArray(runtimeConfig)
+    ? runtimeConfig as Record<string, unknown>
+    : {};
+  const environment = current.environment && typeof current.environment === "object" && !Array.isArray(current.environment)
+    ? current.environment as Record<string, string>
+    : {};
+  return {
+    ...current,
+    environment: {
+      ...environment,
+      ENABLE_RCON: "TRUE",
+      RCON_PASSWORD: environment.RCON_PASSWORD || randomBytes(24).toString("base64url"),
+    },
+  };
+}
 
 async function scope(request: Request, slug: string) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -141,7 +163,7 @@ routes.post("/:orgSlug/game-servers", async (c) => {
   const applicationId = crypto.randomUUID();
   const deploymentId = crypto.randomUUID();
   const containerName = `devion-game-${serverId.replaceAll("-", "")}`;
-  const image = "itzg/minecraft-server:java21";
+  const image = minecraftRuntimeImage;
   const { projectId: _projectId, ...game } = parsed.data;
   await db.transaction(async (tx) => {
     await tx.insert(applications).values({
@@ -194,6 +216,8 @@ routes.post("/:orgSlug/game-servers", async (c) => {
           VERSION: parsed.data.version,
           MOTD: parsed.data.name,
           MEMORY: `${parsed.data.memoryMib}M`,
+          ENABLE_RCON: "TRUE",
+          RCON_PASSWORD: randomBytes(24).toString("base64url"),
         },
         ports: [{ containerPort: 25565 }],
         volumes: [{ name: `${containerName}-data`, target: "/data" }],
@@ -232,9 +256,24 @@ routes.post("/:orgSlug/game-servers/:serverId/start", async (c) => {
   if (!server) return c.json({ error: "Game server must be migrated before agent control is available" }, 409);
   const deploymentId = server.deploymentId;
   if (!deploymentId) return c.json({ error: "Game server has no deployment" }, 409);
+  const applicationId = server.applicationId;
+  if (!applicationId) return c.json({ error: "Game server has no application" }, 409);
   if (!(await hasServerRole(server.id, access, "operator")))
     return c.json({ error: "Server operator role required" }, 403);
-  await db.update(deployments).set({ desiredState: "running" }).where(eq(deployments.id, deploymentId));
+  const deployment = await db.query.deployments.findFirst({ where: eq(deployments.id, deploymentId) });
+  if (!deployment) return c.json({ error: "Game server deployment not found" }, 404);
+  await db
+    .update(deployments)
+    .set({
+      desiredState: "running",
+      image: minecraftRuntimeImage,
+      runtimeConfig: withRconEnabled(deployment.runtimeConfig),
+    })
+    .where(eq(deployments.id, deploymentId));
+  await db
+    .update(applications)
+    .set({ imageName: minecraftRuntimeImage })
+    .where(eq(applications.id, applicationId));
   await db.update(gameServers).set({ status: "provisioning" }).where(eq(gameServers.id, server.id));
   await reconcileDeployment(deploymentId);
   return c.json({ status: "starting" }, 202);
