@@ -90,9 +90,8 @@ services:
       - ../../data/system-updates:/data/system-updates
       - ../../data/traefik/dynamic:/data/traefik/dynamic
       - ../../data/traefik/certs:/data/traefik/certs
-      # Managed PostgreSQL instances are created through the local Docker API.
-      # They are labelled and restricted by the API; no database port is
-      # published on the host.
+      # The current API socket mount is only used by the platform update flow.
+      # Workloads are executed by node agents, never by the API process.
     depends_on:
       updater:
         condition: service_started

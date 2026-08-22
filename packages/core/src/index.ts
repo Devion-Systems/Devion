@@ -1,5 +1,20 @@
 export { parseEnv, type CoreEnv } from "./config/env.js";
-export type { RequestId } from "./types/index.js";
+export type { Brand, RequestId } from "./types/index.js";
+export { scheduleWorkload } from "./control-plane/scheduler.js";
+export {
+  type AgentCommand,
+  type AgentCommandResult,
+  type AgentCommandType,
+  type NodeResources,
+  type NodeSnapshot,
+  type NodeStatus,
+  type ResourceQuantity,
+  type RuntimeKind,
+  type SchedulingDecision,
+  type WorkloadActualState,
+  type WorkloadDesiredState,
+  type WorkloadRequirements,
+} from "./control-plane/contracts.js";
 
 export { AppError, ErrorCode, type AppErrorOptions } from "./error/app-errors.js";
 export {
@@ -11,7 +26,13 @@ export {
   type ProcessGuardOptions,
 } from "./error/error_handler.js";
 
-export { createLogger, getLogger, childLogger, type CreateLoggerOptions, type Logger } from "./logger/logger.js";
+export {
+  createLogger,
+  getLogger,
+  childLogger,
+  type CreateLoggerOptions,
+  type Logger,
+} from "./logger/logger.js";
 
 export {
   HealthRegistry,

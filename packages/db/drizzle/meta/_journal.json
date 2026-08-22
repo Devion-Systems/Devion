@@ -2,17 +2,103 @@
   "version": "7",
   "dialect": "postgresql",
   "entries": [
-    { "idx": 0, "version": "7", "when": 1787153391314, "tag": "0000_public_sandman", "breakpoints": true },
-    { "idx": 1, "version": "7", "when": 1787155368917, "tag": "0001_flowery_longshot", "breakpoints": true },
-    { "idx": 2, "version": "7", "when": 1787158230758, "tag": "0002_friendly_the_enforcers", "breakpoints": true },
-    { "idx": 3, "version": "7", "when": 1787160000000, "tag": "0003_project_domains", "breakpoints": true },
-    { "idx": 4, "version": "7", "when": 1787160600000, "tag": "0004_project_routing_target", "breakpoints": true },
-    { "idx": 5, "version": "7", "when": 1787161200000, "tag": "0005_managed_database_runtime", "breakpoints": true },
-    { "idx": 6, "version": "7", "when": 1787161800000, "tag": "0006_managed_database_public_access", "breakpoints": true },
-    { "idx": 7, "version": "7", "when": 1787164800000, "tag": "0007_audit_logs", "breakpoints": true },
-    { "idx": 8, "version": "7", "when": 1787165400000, "tag": "0008_project_applications", "breakpoints": true },
-    { "idx": 9, "version": "7", "when": 1787166000000, "tag": "0009_project_environments", "breakpoints": true },
-    { "idx": 10, "version": "7", "when": 1787166600000, "tag": "0010_application_runtime", "breakpoints": true },
-    { "idx": 11, "version": "7", "when": 1787167200000, "tag": "0011_game_servers", "breakpoints": true }
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787153391314,
+      "tag": "0000_public_sandman",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787155368917,
+      "tag": "0001_flowery_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787158230758,
+      "tag": "0002_friendly_the_enforcers",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787160000000,
+      "tag": "0003_project_domains",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787160600000,
+      "tag": "0004_project_routing_target",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787161200000,
+      "tag": "0005_managed_database_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787161800000,
+      "tag": "0006_managed_database_public_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787164800000,
+      "tag": "0007_audit_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787165400000,
+      "tag": "0008_project_applications",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787166000000,
+      "tag": "0009_project_environments",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787166600000,
+      "tag": "0010_application_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787167200000,
+      "tag": "0011_game_servers",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787167800000,
+      "tag": "0012_control_plane",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787168400000,
+      "tag": "0013_game_server_rbac",
+      "breakpoints": true
+    }
   ]
 }

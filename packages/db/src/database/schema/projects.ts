@@ -1,4 +1,12 @@
-import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { organization, team, user } from "./auth.js";
 
 /** Projects are always scoped to an organization and can optionally belong to a team. */
@@ -114,14 +122,18 @@ export const applicationDeployments = pgTable(
   "application_deployments",
   {
     id: text("id").primaryKey(),
-    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
     action: text("action", { enum: ["deploy", "stop"] }).notNull(),
     status: text("status", { enum: ["succeeded", "failed"] }).notNull(),
     message: text("message").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [index("application_deployments_application_idx").on(table.applicationId, table.createdAt)],
+  (table) => [
+    index("application_deployments_application_idx").on(table.applicationId, table.createdAt),
+  ],
 );
 
 /** Whitelisted game-server workloads; arbitrary images are deliberately not accepted. */
@@ -129,18 +141,57 @@ export const gameServers = pgTable(
   "game_servers",
   {
     id: text("id").primaryKey(),
-    organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
-    createdByUserId: text("created_by_user_id").notNull().references(() => user.id, { onDelete: "restrict" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    applicationId: text("application_id")
+      .references(() => applications.id, { onDelete: "set null" })
+      .unique(),
+    deploymentId: text("deployment_id"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     game: text("game", { enum: ["minecraft-java"] }).notNull(),
     version: text("version").default("LATEST").notNull(),
     memoryMib: integer("memory_mib").default(2048).notNull(),
     containerName: text("container_name").notNull().unique(),
-    status: text("status", { enum: ["provisioning", "running", "stopped", "failed"] }).default("provisioning").notNull(),
+    runtimePort: integer("runtime_port"),
+    status: text("status", { enum: ["provisioning", "running", "stopped", "failed"] })
+      .default("provisioning")
+      .notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
-  (table) => [index("game_servers_organization_idx").on(table.organizationId)],
+  (table) => [
+    index("game_servers_organization_idx").on(table.organizationId),
+    index("game_servers_project_idx").on(table.projectId),
+  ],
+);
+
+/** Per-server RBAC grants can target one person or an entire organization team. */
+export const gameServerAccess = pgTable(
+  "game_server_access",
+  {
+    id: text("id").primaryKey(),
+    gameServerId: text("game_server_id")
+      .notNull()
+      .references(() => gameServers.id, { onDelete: "cascade" }),
+    subjectType: text("subject_type", { enum: ["user", "team"] }).notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => team.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["viewer", "operator", "admin"] }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("game_server_access_server_idx").on(table.gameServerId),
+    index("game_server_access_user_idx").on(table.userId),
+    index("game_server_access_team_idx").on(table.teamId),
+  ],
 );
 
 /** Persisted deployment configuration. Runtime facts are supplied by agents separately. */
@@ -148,14 +199,21 @@ export const projectEnvironments = pgTable(
   "project_environments",
   {
     id: text("id").primaryKey(),
-    organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     displayName: text("display_name").notNull(),
     branch: text("branch").default("main").notNull(),
     autoDeployEnabled: boolean("auto_deploy_enabled").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (table) => [
     uniqueIndex("project_environments_project_name_uidx").on(table.projectId, table.name),
@@ -169,12 +227,17 @@ export const environmentVariables = pgTable(
   "environment_variables",
   {
     id: text("id").primaryKey(),
-    environmentId: text("environment_id").notNull().references(() => projectEnvironments.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => projectEnvironments.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     valueEncrypted: text("value_encrypted").notNull(),
     isSecret: boolean("is_secret").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (table) => [
     uniqueIndex("environment_variables_environment_key_uidx").on(table.environmentId, table.key),

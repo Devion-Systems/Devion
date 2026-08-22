@@ -30,7 +30,10 @@
     "builder:worker": "bun run --cwd apps/builder dev:worker",
     "builder:agent": "bun run --cwd apps/builder dev:agent",
     "builder:up": "docker compose -f apps/builder/docker-compose.yml up --build -d",
-    "builder:down": "docker compose -f apps/builder/docker-compose.yml down"
+    "builder:down": "docker compose -f apps/builder/docker-compose.yml down",
+    "agent:dev": "bun run --cwd apps/agent dev",
+    "agent:build": "bun run --cwd apps/agent build",
+    "agent:typecheck": "bun run --cwd apps/agent check-types"
   },
   "workspaces": [
     "apps/*",

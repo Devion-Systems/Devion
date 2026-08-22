@@ -3,6 +3,7 @@ import { checkDbHealth, closeDbPool } from "@repo/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { syncFeaturesToDatabase } from "./features/feature/sync_features.js";
+import { startDeploymentController, stopDeploymentController } from "./modules/deployments/controller.js";
 import {
   corsMiddleware,
   globalErrorHandler,
@@ -59,6 +60,7 @@ const startServer = async () => {
   }
 
   logger.info({ port }, `Devion API server starting on port ${port}`);
+  startDeploymentController(logger);
 };
 
 startServer();
@@ -66,6 +68,7 @@ startServer();
 // --- Graceful shutdown ---
 const shutdown = async () => {
   logger.info("Shutting down gracefully...");
+  stopDeploymentController();
   await closeDbPool();
   logger.info("Database pool closed");
   process.exit(0);

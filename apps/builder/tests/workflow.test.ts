@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import { safePath } from "../src/buildkit.ts";
 import { interpolate, validateWorkflow } from "../src/workflow.ts";
 
@@ -46,7 +47,7 @@ describe("workflow validation", () => {
 
   test("prevents checkout path traversal", () => {
     expect(() => safePath("/tmp/job", "../secret")).toThrow();
-    expect(safePath("/tmp/job", "src")).toBe("/tmp/job/src");
+    expect(safePath("/tmp/job", "src")).toBe(resolve("/tmp/job", "src"));
   });
 
   test("interpolates known context without evaluating code", () => {

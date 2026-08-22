@@ -3,6 +3,19 @@ import { isFeatureEnabled } from "../feature/index.js";
 import { resolveLanguageModel } from "./providers.js";
 import type { AiTextRequest } from "./types.js";
 
+/** Stable HTTP response contract; avoid leaking provider SDK types into the API. */
+export interface AiTextResponse {
+  text: string;
+  finishReason: string;
+  usage: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    reasoningTokens?: number;
+    cachedInputTokens?: number;
+  };
+}
+
 function toGenerationOptions(request: AiTextRequest) {
   return {
     model: resolveLanguageModel(request.provider, request.model),
@@ -25,14 +38,20 @@ async function assertAiGatewayEnabled() {
   }
 }
 
-export async function generateAiText(request: AiTextRequest) {
+export async function generateAiText(request: AiTextRequest): Promise<AiTextResponse> {
   await assertAiGatewayEnabled();
   const result = await generateText(toGenerationOptions(request));
 
   return {
     text: result.text,
     finishReason: result.finishReason,
-    usage: result.usage,
+    usage: {
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      totalTokens: result.usage.totalTokens,
+      reasoningTokens: result.usage.reasoningTokens,
+      cachedInputTokens: result.usage.cachedInputTokens,
+    },
   };
 }
 

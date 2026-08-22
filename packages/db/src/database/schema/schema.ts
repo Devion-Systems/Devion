@@ -5,6 +5,7 @@ export * from "./auth.js";
 export * from "./projects.js";
 export * from "./managed-databases.js";
 export * from "./personal.js";
+export * from "./control-plane.js";
 
 export const DEVION_DIR = ".devion";
 export const ACTION_FILES = [`${DEVION_DIR}/action.yml`, `${DEVION_DIR}/action.yaml`] as const;

@@ -1,11 +1,19 @@
-import type { Context, MiddlewareHandler } from 'hono';
-import type { auth } from '@repo/auth'; // your better-auth 
+import type { Context, MiddlewareHandler } from "hono";
+interface OrganizationAuth {
+  api: {
+    verifyApiKey(input: { body: { key: string } }): Promise<{
+      valid?: boolean;
+      key?: { id?: string; metadata?: { organizationId?: string } };
+    } | null>;
+    getSession(input: { headers: Headers }): Promise<{
+      session?: { activeOrganizationId?: string | null };
+    } | null>;
+  };
+}
 export interface RateLimitStore {
-
   increment(key: string, windowMs: number): Promise<{ count: number; resetAt: number }>;
   reset(key: string): Promise<void>;
 }
-
 
 export class MemoryStore implements RateLimitStore {
   private hits = new Map<string, { count: number; resetAt: number }>();
@@ -45,7 +53,6 @@ export class MemoryStore implements RateLimitStore {
   }
 }
 
-
 export interface RedisLike {
   incr(key: string): Promise<number>;
   pexpire(key: string, ms: number): Promise<number | unknown>;
@@ -56,7 +63,7 @@ export interface RedisLike {
 export class RedisStore implements RateLimitStore {
   constructor(
     private redis: RedisLike,
-    private prefix = 'devion:rl:'
+    private prefix = "devion:rl:",
   ) {}
 
   async increment(key: string, windowMs: number) {
@@ -74,7 +81,6 @@ export class RedisStore implements RateLimitStore {
     await this.redis.del(`${this.prefix}${key}`);
   }
 }
-
 
 export interface PgLike {
   query<T = Record<string, unknown>>(sql: string, params: unknown[]): Promise<{ rows: T[] }>;
@@ -99,79 +105,72 @@ export class PostgresStore implements RateLimitStore {
         END
       RETURNING count, reset_at;
       `,
-      [key, windowMs]
+      [key, windowMs],
     );
     const row = rows[0];
     return { count: row.count, resetAt: new Date(row.reset_at).getTime() };
   }
 
   async reset(key: string) {
-    await this.db.query('DELETE FROM rate_limit_counters WHERE key = $1;', [key]);
+    await this.db.query("DELETE FROM rate_limit_counters WHERE key = $1;", [key]);
   }
 
   async cleanupExpired() {
-    await this.db.query('DELETE FROM rate_limit_counters WHERE reset_at <= now();', []);
+    await this.db.query("DELETE FROM rate_limit_counters WHERE reset_at <= now();", []);
   }
 }
-
 
 export function createStoreFromEnv(redisClient?: RedisLike): RateLimitStore {
   if (redisClient) {
     return new RedisStore(redisClient);
   }
   console.warn(
-    '[rate-limit] No Redis client provided — using in-memory store. ' +
-      'This only limits correctly within a single Devion instance; ' +
-      'pass a Redis client once you run more than one instance.'
+    "[rate-limit] No Redis client provided — using in-memory store. " +
+      "This only limits correctly within a single Devion instance; " +
+      "pass a Redis client once you run more than one instance.",
   );
   return new MemoryStore();
 }
 
-
-
-declare module 'hono' {
+declare module "hono" {
   interface ContextVariableMap {
     organizationId?: string;
     apiKeyId?: string;
   }
 }
 
-
-export function resolveOrgContext(authInstance: typeof auth): MiddlewareHandler {
+export function resolveOrgContext(authInstance: OrganizationAuth): MiddlewareHandler {
   return async (c, next) => {
-    const apiKeyHeader = c.req.header('x-api-key') ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+    const apiKeyHeader =
+      c.req.header("x-api-key") ?? c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
 
     if (apiKeyHeader) {
       const result = await authInstance.api.verifyApiKey({ body: { key: apiKeyHeader } });
       if (result?.valid) {
-        c.set('apiKeyId', result.key?.id);
-        c.set('organizationId', result.key?.metadata?.organizationId);
+        c.set("apiKeyId", result.key?.id);
+        c.set("organizationId", result.key?.metadata?.organizationId);
         return next();
       }
     }
 
     const session = await authInstance.api.getSession({ headers: c.req.raw.headers });
-    c.set('organizationId', session?.session?.activeOrganizationId);
+    c.set("organizationId", session?.session?.activeOrganizationId ?? undefined);
     return next();
   };
 }
 
 function clientIp(c: Context): string {
   return (
-    c.req.header('x-real-ip') ??
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown'
+    c.req.header("x-real-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
   );
 }
 
 function defaultKeyGenerator(c: Context): string {
-  
-  return `${c.get('organizationId') ?? 'no-org'}:${clientIp(c)}`;
+  return `${c.get("organizationId") ?? "no-org"}:${clientIp(c)}`;
 }
 
-
 function apiKeyGenerator(c: Context): string {
-  return `apikey:${c.get('apiKeyId') ?? clientIp(c)}`;
+  return `apikey:${c.get("apiKeyId") ?? clientIp(c)}`;
 }
 
 export interface RateLimitOptions {
@@ -187,7 +186,7 @@ export function createRateLimiter(options: RateLimitOptions): MiddlewareHandler 
     store,
     windowMs,
     max,
-    message = 'Too many requests',
+    message = "Too many requests",
     keyGenerator = defaultKeyGenerator,
   } = options;
 
@@ -195,13 +194,13 @@ export function createRateLimiter(options: RateLimitOptions): MiddlewareHandler 
     const key = keyGenerator(c);
     const { count, resetAt } = await store.increment(key, windowMs);
 
-    c.header('X-RateLimit-Limit', String(max));
-    c.header('X-RateLimit-Remaining', String(Math.max(max - count, 0)));
-    c.header('X-RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
+    c.header("X-RateLimit-Limit", String(max));
+    c.header("X-RateLimit-Remaining", String(Math.max(max - count, 0)));
+    c.header("X-RateLimit-Reset", String(Math.ceil(resetAt / 1000)));
 
     if (count > max) {
       const retryAfterSec = Math.max(Math.ceil((resetAt - Date.now()) / 1000), 1);
-      c.header('Retry-After', String(retryAfterSec));
+      c.header("Retry-After", String(retryAfterSec));
       return c.json({ error: message }, 429);
     }
 
@@ -209,8 +208,7 @@ export function createRateLimiter(options: RateLimitOptions): MiddlewareHandler 
   };
 }
 
-
-declare module 'hono' {
+declare module "hono" {
   interface ContextVariableMap {
     loginEmail?: string;
   }
@@ -218,42 +216,39 @@ declare module 'hono' {
 
 export function createDevionRateLimiters(store: RateLimitStore) {
   return {
-
     global: createRateLimiter({
       store,
       windowMs: 60_000,
       max: 300,
     }),
 
-
     auth: createRateLimiter({
       store,
       windowMs: 60_000,
       max: 20,
-      keyGenerator: c => `auth:${clientIp(c)}`,
+      keyGenerator: (c) => `auth:${clientIp(c)}`,
     }),
 
     login: createRateLimiter({
       store,
       windowMs: 15 * 60_000,
       max: 5,
-      keyGenerator: c => `login:${clientIp(c)}:${c.get('loginEmail') ?? 'unknown'}`,
-      message: 'Too many failed login attempts. Try again in 15 minutes.',
+      keyGenerator: (c) => `login:${clientIp(c)}:${c.get("loginEmail") ?? "unknown"}`,
+      message: "Too many failed login attempts. Try again in 15 minutes.",
     }),
-
 
     perOrgApi: createRateLimiter({
       store,
       windowMs: 60_000,
       max: 600,
-      keyGenerator: c => `org-api:${c.get('organizationId') ?? 'no-org'}`,
+      keyGenerator: (c) => `org-api:${c.get("organizationId") ?? "no-org"}`,
     }),
     perApiKey: createRateLimiter({
       store,
       windowMs: 60_000,
       max: 1_200,
       keyGenerator: apiKeyGenerator,
-      message: 'API key rate limit exceeded.',
+      message: "API key rate limit exceeded.",
     }),
   };
 }
