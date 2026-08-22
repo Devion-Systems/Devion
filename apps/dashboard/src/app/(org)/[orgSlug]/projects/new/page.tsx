@@ -75,8 +75,7 @@ export default function NewProjectPage() {
           slug: name,
           description,
           type,
-          gitUrl,
-          branch,
+          ...(type === "git" ? { gitUrl: gitUrl.trim(), branch: branch.trim() || "main" } : {}),
           teamId: teamId || undefined,
         }),
       });

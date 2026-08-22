@@ -17,7 +17,12 @@ const projectInputSchema = z.object({
     .max(64),
   description: z.string().trim().max(500).optional(),
   type: z.enum(["git", "docker", "blank"]),
-  gitUrl: z.string().url().max(2_000).optional(),
+  // Forms commonly submit an empty string for an unselected Git source.
+  // Normalize it before URL validation so blank and Docker projects work.
+  gitUrl: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().url().max(2_000).optional(),
+  ),
   branch: z.string().trim().min(1).max(255).optional(),
   teamId: z.string().min(1).optional(),
 });
