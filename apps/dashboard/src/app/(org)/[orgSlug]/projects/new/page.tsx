@@ -10,6 +10,7 @@ import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
 type ProjectType = "git" | "docker" | "blank";
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const PROJECT_TYPES: {
   type: ProjectType;
@@ -79,7 +80,10 @@ export default function NewProjectPage() {
           teamId: teamId || undefined,
         }),
       });
-      if (!res.ok) throw new Error("Projekt konnte nicht erstellt werden");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "Projekt konnte nicht erstellt werden");
+      }
       return res.json() as Promise<{ id: string }>;
     },
     onSuccess: (data) => router.push(`/${orgSlug}/projects/${data.id}`),
@@ -153,14 +157,16 @@ export default function NewProjectPage() {
             type="text"
             value={name}
             onChange={(e) =>
-              setName(e.target.value.toLowerCase().replace(/\s/g, "-"))
+              setName(e.target.value.toLowerCase().replace(/\s+/g, "-"))
             }
             placeholder="mein-projekt"
+            aria-invalid={Boolean(name) && !slugPattern.test(name)}
             className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-[#0984e3]/50 focus:outline-none focus:ring-2 focus:ring-[#0984e3]/20"
           />
           <p className="mt-1 text-[11px] text-zinc-600">
             Nur Kleinbuchstaben, Zahlen und Bindestriche
           </p>
+          {name && !slugPattern.test(name) ? <p role="alert" className="mt-1 text-xs text-red-300">Der Name darf nur Kleinbuchstaben, Zahlen und Bindestriche enthalten.</p> : null}
         </div>
 
         <div>
@@ -244,13 +250,14 @@ export default function NewProjectPage() {
       </div>
 
       {/* Submit */}
+      {create.error ? <p role="alert" className="rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200">{create.error.message}</p> : null}
       <div className="flex items-center justify-between gap-4 border-t border-white/[0.06] pt-6">
         <Button variant="ghost" onClick={() => router.back()}>
           Abbrechen
         </Button>
         <Button
           onClick={() => create.mutate()}
-          disabled={!name || create.isPending}
+          disabled={!name || !slugPattern.test(name) || create.isPending}
           className="gap-2"
         >
           {create.isPending ? "Erstelle …" : "Projekt erstellen"}
