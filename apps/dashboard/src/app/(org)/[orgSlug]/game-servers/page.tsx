@@ -82,6 +82,14 @@ export default function GameServersPage() {
   const [pendingDelete, setPendingDelete] = useState<Server | null>(null);
   const servers = useQuery<Server[]>({
     queryKey: ["org", orgSlug, "game-servers"],
+    // Agent work is asynchronous. Keep the card state in sync while a server
+    // is provisioning, starting, stopping, or recovering from a failure.
+    refetchInterval: (query) =>
+      query.state.data?.some((server) =>
+        ["provisioning", "starting", "stopping", "failed"].includes(server.status),
+      )
+        ? 3_000
+        : false,
     queryFn: async () => {
       const response = await fetch(
         api(`/organizations/${orgSlug}/game-servers`),
