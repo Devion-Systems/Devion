@@ -36,21 +36,18 @@ type AccessGrant = {
 type ConsoleData = { logs: string; updatedAt: string | null; status: string };
 type CommandResult = { status: string; output: string; error: string | null };
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
-const minecraftVersions = [
-  "LATEST",
-  "26.1.2",
-  "26.1",
-  "1.21.8",
-  "1.21.7",
-  "1.21.6",
-  "1.21.5",
-  "1.21.4",
-  "1.20.6",
-  "1.20.4",
-  "1.19.4",
-  "1.18.2",
-  "1.16.5",
+type MinecraftVersion = { id: string; type: string; releaseTime: string };
+const fallbackMinecraftVersions: MinecraftVersion[] = [
+  { id: "LATEST", type: "recommended", releaseTime: "" },
+  { id: "1.21.8", type: "release", releaseTime: "" },
+  { id: "1.21.7", type: "release", releaseTime: "" },
+  { id: "1.20.6", type: "release", releaseTime: "" },
+  { id: "1.20.4", type: "release", releaseTime: "" },
+  { id: "1.19.4", type: "release", releaseTime: "" },
+  { id: "1.18.2", type: "release", releaseTime: "" },
+  { id: "1.16.5", type: "release", releaseTime: "" },
 ];
+const minecraftManifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
 async function responseMessage(response: Response, fallback: string) {
   try {
@@ -112,6 +109,17 @@ export default function GameServersPage() {
       return response.json();
     },
   });
+  const versionCatalog = useQuery<MinecraftVersion[]>({
+    queryKey: ["minecraft", "version-catalog"],
+    staleTime: 24 * 60 * 60 * 1_000,
+    queryFn: async () => {
+      const response = await fetch(minecraftManifestUrl);
+      if (!response.ok) throw new Error("Minecraft-Versionskatalog konnte nicht geladen werden");
+      const manifest = await response.json() as { versions?: MinecraftVersion[] };
+      return (manifest.versions ?? []).filter((item) => item.id && item.type);
+    },
+  });
+  const minecraftVersions = versionCatalog.data ?? fallbackMinecraftVersions;
   const nodes = useQuery<Node[]>({
     queryKey: ["org", orgSlug, "nodes"],
     queryFn: async () => {
@@ -366,16 +374,16 @@ export default function GameServersPage() {
           />
           {name.length > 80 ? <span className="mt-1 flex items-center gap-1 text-xs text-red-300"><CircleAlert className="size-3" />Maximal 80 Zeichen</span> : null}
         </label>
-        <input
+        <label className="text-sm text-zinc-300"><span className="mb-1 block">Minecraft-Version</span><input
           value={version}
           onChange={(event) => setVersion(event.target.value)}
           list="minecraft-versions"
           aria-label="Minecraft-Version"
-          className="h-10 w-36 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
-        />
+          className="h-10 w-44 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
+        /></label>
         <datalist id="minecraft-versions">
           {minecraftVersions.map((minecraftVersion) => (
-            <option key={minecraftVersion} value={minecraftVersion} />
+            <option key={minecraftVersion.id} value={minecraftVersion.id} label={minecraftVersion.type} />
           ))}
         </datalist>
         <Button
