@@ -125,6 +125,27 @@ services:
       - ../..:/workspace
     networks: [devion]
 
+  # The local agent is the only service that controls workload containers.
+  # Before it is enrolled it waits safely for the one-shot Hardware flow.
+  agent:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.api
+    command: ["bun", "run", "--cwd", "apps/agent", "start"]
+    restart: unless-stopped
+    environment:
+      DEVION_API_URL: http://api:3000
+      DEVION_AGENT_NAME: ${DEVION_AGENT_NAME:-devion-local}
+      DEVION_AGENT_DATA_DIR: /var/lib/devion-agent
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent-data:/var/lib/devion-agent
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [devion]
+
   dashboard:
     build:
       context: ../..
@@ -175,6 +196,7 @@ services:
     networks: [devion]
 
 volumes:
+  agent-data:
   postgres-data:
   rustfs-data:
   registry-data:

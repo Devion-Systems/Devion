@@ -13,7 +13,7 @@ export function getOrgNavGroups(orgSlug: string): NavGroup[] {
   return [
     { title: "Übersicht", icon: LayoutDashboard, defaultOpen: true, items: [{ label: "Dashboard", href: base, icon: LayoutDashboard }] },
     { title: "Projekte", icon: FolderKanban, defaultOpen: true, items: [{ label: "Alle Projekte", href: `${base}/projects`, icon: FolderKanban }] },
-    { title: "Workloads", icon: AppWindow, items: [
+    { title: "Workloads", icon: AppWindow, defaultOpen: true, items: [
       { label: "Anwendungen", href: `${base}/applications`, icon: AppWindow },
       { label: "Game Server", href: `${base}/game-servers`, icon: Gamepad2 },
     ] },

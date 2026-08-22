@@ -82,17 +82,18 @@ POST /organizations/{orgSlug}/nodes/registration-tokens
 { "expiresInSeconds": 3600 }
 ```
 
-Use the returned token exactly once on the target node:
+For the Docker host installed by Devion, use the returned token exactly once:
 
 ```bash
-export DEVION_API_URL=https://devion.example
-export DEVION_AGENT_REGISTRATION_TOKEN='one-time-token'
-export DEVION_AGENT_NAME='node-fra-01'
-export DEVION_AGENT_DATA_DIR=/var/lib/devion-agent
-bun run --cwd apps/agent start
+cd /opt/devion
+docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml run --build --rm --no-deps \
+  -e DEVION_AGENT_REGISTRATION_TOKEN='one-time-token' \
+  -e DEVION_AGENT_ENROLLMENT_ONLY=true \
+  agent
 ```
 
-After enrollment, the agent stores its own identity under `DEVION_AGENT_DATA_DIR/identity.json`; the registration token is no longer needed.
+The installer starts a resident local agent which waits for this enrollment.
+After enrollment it picks up its identity from the persistent agent volume; the registration token is no longer needed.
 
 ## Minecraft server management
 

@@ -10,6 +10,9 @@ const schema = z.object({
   DEVION_AGENT_ARCHITECTURE: z.string().min(1).max(64).default(process.arch),
   DEVION_AGENT_OS: z.string().min(1).max(128).default(process.platform),
   DEVION_AGENT_POLL_INTERVAL_MS: z.coerce.number().int().min(500).max(60_000).default(5_000),
+  // The compose bootstrap command uses this to enrol once without starting a
+  // second long-running worker next to the resident agent.
+  DEVION_AGENT_ENROLLMENT_ONLY: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   DOCKER_SOCKET_PATH: z.string().min(1).default("/var/run/docker.sock"),
 });
 

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Gamepad2, LoaderCircle, Play, Plus, Send, Square, Terminal, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -19,6 +20,7 @@ type Server = {
   projectId: string | null;
 };
 type Project = { id: string; name: string };
+type Node = { id: string; status: string; schedulingEnabled: boolean };
 type Team = { id: string; name: string };
 type OrgMember = { userId: string; name: string; email: string };
 type AccessGrant = {
@@ -98,6 +100,14 @@ export default function GameServersPage() {
       });
       if (!response.ok)
         throw new Error("Projekte konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const nodes = useQuery<Node[]>({
+    queryKey: ["org", orgSlug, "nodes"],
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}/nodes`), { credentials: "include" });
+      if (!response.ok) throw new Error("Nodes konnten nicht geladen werden");
       return response.json();
     },
   });
@@ -297,6 +307,12 @@ export default function GameServersPage() {
         title="Game Server"
         description="Minecraft-Java-Server mit Konsole, Dateien und rollenbasiertem Zugriff."
       />
+      {nodes.isSuccess && !nodes.data.some((node) => node.status === "ready" && node.schedulingEnabled) ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+          <span>Zum Starten und Verwalten wird ein verbundener, aktiver Node benötigt.</span>
+          <Button asChild size="sm" variant="outline" className="min-h-10"><Link href={`/${orgSlug}/hardware/connect`}>Node verbinden</Link></Button>
+        </div>
+      ) : null}
       {notice ? (
         <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
           <span>{notice}</span>

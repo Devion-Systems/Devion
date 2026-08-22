@@ -20,7 +20,7 @@ export default function HardwareConnectPage() {
     if (!response.ok) throw new Error("Registrierungstoken konnte nicht erstellt werden");
     return response.json() as Promise<{ registrationToken: string; expiresAt: string }>;
   } });
-  const command = token.data ? `export DEVION_API_URL=https://devion.example\nexport DEVION_AGENT_REGISTRATION_TOKEN='${token.data.registrationToken}'\nexport DEVION_AGENT_NAME='node-fra-01'\nexport DEVION_AGENT_DATA_DIR=/var/lib/devion-agent\nbun run --cwd apps/agent start` : "";
+  const command = token.data ? `cd /opt/devion\ndocker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml run --build --rm --no-deps \\\n+  -e DEVION_AGENT_REGISTRATION_TOKEN='${token.data.registrationToken}' \\\n+  -e DEVION_AGENT_ENROLLMENT_ONLY=true \\\n+  agent` : "";
   const copy = async () => { await navigator.clipboard.writeText(command); setCopied(true); window.setTimeout(() => setCopied(false), 2000); };
   return <div className="space-y-6 p-6">
     <div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Node verbinden" description="Erstelle einen einmaligen Token und installiere den Devion Agent auf dem Zielhost." /><Button asChild variant="outline"><Link href={`/${orgSlug}/hardware`}>Zur Hardware</Link></Button></div>

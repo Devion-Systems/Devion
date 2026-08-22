@@ -29,19 +29,20 @@ POST /organizations/{orgSlug}/nodes/registration-tokens
 { "expiresInSeconds": 3600 }
 ```
 
-The raw registration token is returned once. Configure the agent on the node:
+The raw registration token is returned once. For the Docker host installed by
+Devion, run the enrollment command on that host:
 
 ```bash
-export DEVION_API_URL=https://devion.example
-export DEVION_AGENT_REGISTRATION_TOKEN='one-time-token'
-export DEVION_AGENT_NAME='node-fra-01'
-export DEVION_AGENT_DATA_DIR=/var/lib/devion-agent
-bun run --cwd apps/agent start
+cd /opt/devion
+docker compose --env-file deploy/docker/.env -f deploy/docker/docker-compose.yml run --build --rm --no-deps \
+  -e DEVION_AGENT_REGISTRATION_TOKEN='one-time-token' \
+  -e DEVION_AGENT_ENROLLMENT_ONLY=true \
+  agent
 ```
 
-After registration, the agent stores only its own identity at
-`DEVION_AGENT_DATA_DIR/identity.json` with restrictive file permissions. The
-one-time registration token is no longer needed.
+The resident Compose agent waits for enrollment and then reads its identity
+from its persistent data volume. The one-time registration token is no longer
+needed.
 
 ## Supported V1 workload path
 

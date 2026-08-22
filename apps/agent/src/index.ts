@@ -69,13 +69,13 @@ const minecraftFilePath = z.string().min(1).max(240).refine(
 );
 const minecraftFileReadPayload = z.object({ path: minecraftFilePath });
 const minecraftFileWritePayload = z.object({ path: minecraftFilePath, content: z.string().max(512 * 1024) });
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function loadIdentity() {
   try {
-    return identitySchema.parse(JSON.parse(await readFile(identityPath, "utf8")));
+    return { identity: identitySchema.parse(JSON.parse(await readFile(identityPath, "utf8"))), enrolled: false };
   } catch {
-    if (!config.DEVION_AGENT_REGISTRATION_TOKEN)
-      throw new Error("DEVION_AGENT_REGISTRATION_TOKEN is required for first enrollment");
+    if (!config.DEVION_AGENT_REGISTRATION_TOKEN) return null;
     const response = await fetch(new URL("/api/agents/register", config.DEVION_API_URL), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -93,7 +93,21 @@ async function loadIdentity() {
     const identity = identitySchema.parse(await response.json());
     await mkdir(config.DEVION_AGENT_DATA_DIR, { recursive: true });
     await writeFile(identityPath, JSON.stringify(identity), { mode: 0o600 });
-    return identity;
+    return { identity, enrolled: true };
+  }
+}
+
+/** A resident Compose agent waits for the one-shot enrollment command. */
+async function resolveIdentity() {
+  for (;;) {
+    try {
+      const loaded = await loadIdentity();
+      if (loaded) return loaded;
+      console.log("Devion Agent is waiting for enrollment. Create a token in Hardware > Node verbinden.");
+    } catch (error) {
+      console.error("Agent enrollment failed; retrying", error);
+    }
+    await wait(5_000);
   }
 }
 
@@ -219,7 +233,11 @@ async function tick(identity: z.infer<typeof identitySchema>): Promise<void> {
     await execute(identity, command);
 }
 
-const identity = await loadIdentity();
+const { identity, enrolled } = await resolveIdentity();
+if (config.DEVION_AGENT_ENROLLMENT_ONLY && enrolled) {
+  console.log(`Devion Agent ${identity.nodeId} enrolled successfully.`);
+  process.exit(0);
+}
 console.log(`Devion Agent ${identity.nodeId} connected from ${hostname()}`);
 await tick(identity);
 setInterval(
