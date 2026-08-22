@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, CircleAlert, Cpu, FileText, FolderTree, Gamepad2, HardDrive, LoaderCircle, MemoryStick, Network, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Terminal, Trash2, Wifi, X } from "lucide-react";
+import { Activity, Check, CircleAlert, Copy, Cpu, FileText, FolderTree, Gamepad2, HardDrive, LoaderCircle, MemoryStick, Network, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Terminal, Trash2, Wifi, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -80,6 +80,7 @@ export default function GameServersPage() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Server | null>(null);
+  const [copiedAddress, setCopiedAddress] = useState(false);
   const servers = useQuery<Server[]>({
     queryKey: ["org", orgSlug, "game-servers"],
     // Agent work is asynchronous. Keep the card state in sync while a server
@@ -239,6 +240,15 @@ export default function GameServersPage() {
     },
   });
   const selectedServer = (servers.data ?? []).find((server) => server.id === selectedServerId);
+  const connectionAddress = selectedServer?.runtimePort
+    ? `${typeof window === "undefined" ? "server" : window.location.hostname}:${selectedServer.runtimePort}`
+    : null;
+  const copyConnectionAddress = async () => {
+    if (!connectionAddress) return;
+    await navigator.clipboard.writeText(connectionAddress);
+    setCopiedAddress(true);
+    window.setTimeout(() => setCopiedAddress(false), 2_000);
+  };
   const runFileCommand = async (action: "list" | "read" | "write", payload: Record<string, string> = {}) => {
     if (!selectedServerId) return null;
     setFileBusy(true); setFileError(null);
@@ -557,7 +567,7 @@ export default function GameServersPage() {
             <aside className="border-t border-white/[0.08] bg-[#10191f] p-5 xl:border-t-0 xl:border-l">
               <h3 className="text-sm font-semibold text-zinc-100">Serverstatus</h3>
               <div className="mt-4 space-y-4 text-sm">
-                <div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-zinc-500"><Wifi className="size-3.5" />Adresse</span><span className="max-w-36 truncate font-mono text-xs text-zinc-200">{selectedServer.runtimePort ? `:${selectedServer.runtimePort}` : "Nach Start verfügbar"}</span></div>
+                <div><span className="inline-flex items-center gap-2 text-zinc-500"><Wifi className="size-3.5" />Minecraft-Joinsadresse</span>{connectionAddress ? <div className="mt-2 flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#080d10] p-1"><code className="min-w-0 flex-1 truncate px-2 font-mono text-xs text-emerald-200">{connectionAddress}</code><Button size="icon-xs" variant="ghost" aria-label="Joinsadresse kopieren" onClick={() => void copyConnectionAddress()}>{copiedAddress ? <Check className="size-3.5 text-emerald-300" /> : <Copy className="size-3.5" />}</Button></div> : <p className="mt-2 text-xs text-zinc-500">Wird verfügbar, sobald der Server läuft.</p>}</div>
                 <div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-zinc-500"><Activity className="size-3.5" />Zustand</span><ResourceStatusBadge status={selectedServer.status === "running" ? "healthy" : selectedServer.status} /></div>
                 <div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-zinc-500"><Network className="size-3.5" />Runtime</span><span className="text-xs text-zinc-200">Docker lokal</span></div>
               </div>
