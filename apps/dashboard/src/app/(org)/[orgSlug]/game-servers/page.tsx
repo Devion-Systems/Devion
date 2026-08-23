@@ -1,14 +1,33 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, CircleAlert, Copy, File, Folder, FolderOpen, FolderTree, Gamepad2, LoaderCircle, Play, Plus, RefreshCw, Send, ShieldCheck, Square, Terminal, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CircleAlert,
+  Copy,
+  File,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  Gamepad2,
+  LoaderCircle,
+  Play,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Square,
+  Terminal,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { PageHeader } from "@/components/layout/page-header";
 import { DesignEmptyState } from "@/components/layout/design-empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
 import { Button } from "@/components/ui/button";
+import { XtermTerminal } from "@/components/ui/xterm-terminal";
 
 type Server = {
   id: string;
@@ -48,11 +67,12 @@ const fallbackMinecraftVersions: MinecraftVersion[] = [
   { id: "1.18.2", type: "release", releaseTime: "" },
   { id: "1.16.5", type: "release", releaseTime: "" },
 ];
-const minecraftManifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const minecraftManifestUrl =
+  "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
 async function responseMessage(response: Response, fallback: string) {
   try {
-    const body = await response.json() as { error?: string };
+    const body = (await response.json()) as { error?: string };
     return body.error ?? fallback;
   } catch {
     return fallback;
@@ -67,11 +87,12 @@ export default function GameServersPage() {
   const [projectId, setProjectId] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
-  const [consoleCommand, setConsoleCommand] = useState("");
   const [lastCommandId, setLastCommandId] = useState<string | null>(null);
   const [grantTarget, setGrantTarget] = useState("");
   const [grantRole, setGrantRole] = useState<AccessGrant["role"]>("operator");
-  const [managementTab, setManagementTab] = useState<"console" | "files" | "access">("console");
+  const [managementTab, setManagementTab] = useState<
+    "console" | "files" | "access"
+  >("console");
   const [fileEntries, setFileEntries] = useState<string[]>([]);
   const [fileBrowserPath, setFileBrowserPath] = useState("");
   const [filePath, setFilePath] = useState("");
@@ -87,7 +108,9 @@ export default function GameServersPage() {
     // is provisioning, starting, stopping, or recovering from a failure.
     refetchInterval: (query) =>
       query.state.data?.some((server) =>
-        ["provisioning", "starting", "stopping", "failed"].includes(server.status),
+        ["provisioning", "starting", "stopping", "failed"].includes(
+          server.status,
+        ),
       )
         ? 3_000
         : false,
@@ -117,8 +140,13 @@ export default function GameServersPage() {
     staleTime: 24 * 60 * 60 * 1_000,
     queryFn: async () => {
       const response = await fetch(minecraftManifestUrl);
-      if (!response.ok) throw new Error("Minecraft-Versionskatalog konnte nicht geladen werden");
-      const manifest = await response.json() as { versions?: MinecraftVersion[] };
+      if (!response.ok)
+        throw new Error(
+          "Minecraft-Versionskatalog konnte nicht geladen werden",
+        );
+      const manifest = (await response.json()) as {
+        versions?: MinecraftVersion[];
+      };
       return (manifest.versions ?? []).filter((item) => item.id && item.type);
     },
   });
@@ -126,7 +154,9 @@ export default function GameServersPage() {
   const nodes = useQuery<Node[]>({
     queryKey: ["org", orgSlug, "nodes"],
     queryFn: async () => {
-      const response = await fetch(api(`/organizations/${orgSlug}/nodes`), { credentials: "include" });
+      const response = await fetch(api(`/organizations/${orgSlug}/nodes`), {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Nodes konnten nicht geladen werden");
       return response.json();
     },
@@ -134,7 +164,9 @@ export default function GameServersPage() {
   const teams = useQuery<Team[]>({
     queryKey: ["org", orgSlug, "teams"],
     queryFn: async () => {
-      const response = await fetch(api(`/organizations/${orgSlug}/teams`), { credentials: "include" });
+      const response = await fetch(api(`/organizations/${orgSlug}/teams`), {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Teams konnten nicht geladen werden");
       return response.json();
     },
@@ -142,8 +174,12 @@ export default function GameServersPage() {
   const members = useQuery<OrgMember[]>({
     queryKey: ["org", orgSlug, "team-members"],
     queryFn: async () => {
-      const response = await fetch(api(`/organizations/${orgSlug}/team-members`), { credentials: "include" });
-      if (!response.ok) throw new Error("Mitglieder konnten nicht geladen werden");
+      const response = await fetch(
+        api(`/organizations/${orgSlug}/team-members`),
+        { credentials: "include" },
+      );
+      if (!response.ok)
+        throw new Error("Mitglieder konnten nicht geladen werden");
       return response.json();
     },
   });
@@ -181,7 +217,13 @@ export default function GameServersPage() {
           }),
         },
       );
-      if (!response.ok) throw new Error(await responseMessage(response, "Server konnte nicht erstellt werden"));
+      if (!response.ok)
+        throw new Error(
+          await responseMessage(
+            response,
+            "Server konnte nicht erstellt werden",
+          ),
+        );
     },
     onSuccess: () => {
       setName("");
@@ -207,11 +249,21 @@ export default function GameServersPage() {
           credentials: "include",
         },
       );
-      if (!response.ok) throw new Error(await responseMessage(response, "Aktion fehlgeschlagen"));
+      if (!response.ok)
+        throw new Error(
+          await responseMessage(response, "Aktion fehlgeschlagen"),
+        );
     },
     onSuccess: (_, input) => {
-      setNotice(input.method === "start" ? "Der Server wird gestartet." : input.method === "stop" ? "Der Server wird gestoppt." : "Der Server wurde gelöscht.");
-      if (input.method === "delete" && selectedServerId === input.server.id) setSelectedServerId(null);
+      setNotice(
+        input.method === "start"
+          ? "Der Server wird gestartet."
+          : input.method === "stop"
+            ? "Der Server wird gestoppt."
+            : "Der Server wurde gelöscht.",
+      );
+      if (input.method === "delete" && selectedServerId === input.server.id)
+        setSelectedServerId(null);
       refresh();
     },
   });
@@ -221,32 +273,50 @@ export default function GameServersPage() {
     refetchInterval: 2_500,
     queryFn: async () => {
       const response = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/console?tail=800`),
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/console?tail=800`,
+        ),
         { credentials: "include" },
       );
-      if (!response.ok) throw new Error("Server-Konsole konnte nicht geladen werden");
+      if (!response.ok)
+        throw new Error("Server-Konsole konnte nicht geladen werden");
       return response.json();
     },
   });
   const commandResult = useQuery<CommandResult>({
-    queryKey: ["org", orgSlug, "game-servers", selectedServerId, "console-command", lastCommandId],
+    queryKey: [
+      "org",
+      orgSlug,
+      "game-servers",
+      selectedServerId,
+      "console-command",
+      lastCommandId,
+    ],
     enabled: Boolean(selectedServerId && lastCommandId),
     refetchInterval: (query) =>
-      query.state.data?.status === "pending" || query.state.data?.status === "delivered" ? 1_000 : false,
+      query.state.data?.status === "pending" ||
+      query.state.data?.status === "delivered"
+        ? 1_000
+        : false,
     queryFn: async () => {
       const response = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/console/commands/${lastCommandId}`),
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/console/commands/${lastCommandId}`,
+        ),
         { credentials: "include" },
       );
-      if (!response.ok) throw new Error("Konsolenbefehl konnte nicht gelesen werden");
+      if (!response.ok)
+        throw new Error("Konsolenbefehl konnte nicht gelesen werden");
       return response.json();
     },
   });
   const command = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (consoleCommand: string) => {
       if (!selectedServerId) throw new Error("Kein Server ausgewaehlt");
       const response = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/console`),
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/console`,
+        ),
         {
           method: "POST",
           credentials: "include",
@@ -254,53 +324,86 @@ export default function GameServersPage() {
           body: JSON.stringify({ command: consoleCommand }),
         },
       );
-      if (!response.ok) throw new Error("Konsolenbefehl konnte nicht gesendet werden");
+      if (!response.ok)
+        throw new Error("Konsolenbefehl konnte nicht gesendet werden");
       return response.json() as Promise<{ commandId: string }>;
     },
     onSuccess: (result) => {
       setLastCommandId(result.commandId);
-      setConsoleCommand("");
       setNotice("Konsolenbefehl wurde an den Node-Agent gesendet.");
       void consoleData.refetch();
     },
   });
-  const selectedServer = (servers.data ?? []).find((server) => server.id === selectedServerId);
-  const connectionAddress = selectedServer?.status === "running" && selectedServer.runtimePort
-    ? `${typeof window === "undefined" ? "server" : window.location.hostname}:${selectedServer.runtimePort}`
-    : null;
+  const selectedServer = (servers.data ?? []).find(
+    (server) => server.id === selectedServerId,
+  );
+  const connectionAddress =
+    selectedServer?.status === "running" && selectedServer.runtimePort
+      ? `${typeof window === "undefined" ? "server" : window.location.hostname}:${selectedServer.runtimePort}`
+      : null;
   const copyConnectionAddress = async () => {
     if (!connectionAddress) return;
     await navigator.clipboard.writeText(connectionAddress);
     setCopiedAddress(true);
     window.setTimeout(() => setCopiedAddress(false), 2_000);
   };
-  const runFileCommand = async (action: "list" | "read" | "write", payload: Record<string, string> = {}) => {
+  const runFileCommand = async (
+    action: "list" | "read" | "write",
+    payload: Record<string, string> = {},
+  ) => {
     if (!selectedServerId) return null;
-    setFileBusy(true); setFileError(null);
+    setFileBusy(true);
+    setFileError(null);
     try {
       const submitted = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/files/${action}`),
-        { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) },
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/files/${action}`,
+        ),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        },
       );
-      if (!submitted.ok) throw new Error("Dateioperation konnte nicht gestartet werden");
-      const { commandId } = await submitted.json() as { commandId: string };
+      if (!submitted.ok)
+        throw new Error("Dateioperation konnte nicht gestartet werden");
+      const { commandId } = (await submitted.json()) as { commandId: string };
       for (let attempt = 0; attempt < 20; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 750));
-        const response = await fetch(api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/files/commands/${commandId}`), { credentials: "include" });
-        if (!response.ok) throw new Error("Dateioperation konnte nicht gelesen werden");
-        const result = await response.json() as { status: string; data: { entries?: string; content?: string } | null; error: string | null };
+        const response = await fetch(
+          api(
+            `/organizations/${orgSlug}/game-servers/${selectedServerId}/files/commands/${commandId}`,
+          ),
+          { credentials: "include" },
+        );
+        if (!response.ok)
+          throw new Error("Dateioperation konnte nicht gelesen werden");
+        const result = (await response.json()) as {
+          status: string;
+          data: { entries?: string; content?: string } | null;
+          error: string | null;
+        };
         if (result.status === "succeeded") return result.data;
-        if (result.status === "failed") throw new Error(result.error ?? "Dateioperation fehlgeschlagen");
+        if (result.status === "failed")
+          throw new Error(result.error ?? "Dateioperation fehlgeschlagen");
       }
       throw new Error("Agent antwortet nicht rechtzeitig");
     } catch (error) {
-      setFileError(error instanceof Error ? error.message : "Dateioperation fehlgeschlagen");
+      setFileError(
+        error instanceof Error
+          ? error.message
+          : "Dateioperation fehlgeschlagen",
+      );
       return null;
-    } finally { setFileBusy(false); }
+    } finally {
+      setFileBusy(false);
+    }
   };
   const loadFiles = async () => {
     const result = await runFileCommand("list");
-    if (typeof result?.entries === "string") setFileEntries(result.entries.split("\n").filter(Boolean));
+    if (typeof result?.entries === "string")
+      setFileEntries(result.entries.split("\n").filter(Boolean));
   };
   const openFile = async (path: string) => {
     setFilePath(path);
@@ -308,14 +411,18 @@ export default function GameServersPage() {
     const result = await runFileCommand("read", { path });
     if (typeof result?.content === "string") setFileContent(result.content);
   };
-  const fileBrowserEntries = fileEntries.flatMap((line): FileEntry[] => {
-    const [kind, path, size] = line.split("\t");
-    return (kind === "d" || kind === "f") && path ? [{ kind, path, size: Number(size) || 0 }] : [];
-  }).filter((entry) => {
-    const prefix = fileBrowserPath ? `${fileBrowserPath}/` : "";
-    if (!entry.path.startsWith(prefix)) return false;
-    return !entry.path.slice(prefix.length).includes("/");
-  });
+  const fileBrowserEntries = fileEntries
+    .flatMap((line): FileEntry[] => {
+      const [kind, path, size] = line.split("\t");
+      return (kind === "d" || kind === "f") && path
+        ? [{ kind, path, size: Number(size) || 0 }]
+        : [];
+    })
+    .filter((entry) => {
+      const prefix = fileBrowserPath ? `${fileBrowserPath}/` : "";
+      if (!entry.path.startsWith(prefix)) return false;
+      return !entry.path.slice(prefix.length).includes("/");
+    });
   const browserBreadcrumbs = fileBrowserPath ? fileBrowserPath.split("/") : [];
   const fileManager = (
     <div className="mt-4 grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
@@ -324,40 +431,158 @@ export default function GameServersPage() {
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-medium text-zinc-100">Dateien</h3>
-              <p className="mt-0.5 text-xs text-zinc-500">Persistenter Serverordner</p>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                Persistenter Serverordner
+              </p>
             </div>
-            <Button size="icon-xs" variant="ghost" aria-label="Dateiliste aktualisieren" disabled={fileBusy} onClick={() => void loadFiles()}>
-              <RefreshCw className={`size-3.5 ${fileBusy ? "animate-spin" : ""}`} />
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Dateiliste aktualisieren"
+              disabled={fileBusy}
+              onClick={() => void loadFiles()}
+            >
+              <RefreshCw
+                className={`size-3.5 ${fileBusy ? "animate-spin" : ""}`}
+              />
             </Button>
           </div>
-          <nav aria-label="Aktueller Ordner" className="mt-3 flex min-w-0 items-center overflow-x-auto text-xs text-zinc-400">
-            <button type="button" onClick={() => setFileBrowserPath("")} className="shrink-0 rounded px-1 py-1 hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]">/data</button>
+          <nav
+            aria-label="Aktueller Ordner"
+            className="mt-3 flex min-w-0 items-center overflow-x-auto text-xs text-zinc-400"
+          >
+            <button
+              type="button"
+              onClick={() => setFileBrowserPath("")}
+              className="shrink-0 rounded px-1 py-1 hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"
+            >
+              /data
+            </button>
             {browserBreadcrumbs.map((part, index) => {
               const target = browserBreadcrumbs.slice(0, index + 1).join("/");
-              return <span key={target} className="flex shrink-0 items-center"><ChevronRight className="size-3 text-zinc-600" /><button type="button" onClick={() => setFileBrowserPath(target)} className="rounded px-1 py-1 hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]">{part}</button></span>;
+              return (
+                <span key={target} className="flex shrink-0 items-center">
+                  <ChevronRight className="size-3 text-zinc-600" />
+                  <button
+                    type="button"
+                    onClick={() => setFileBrowserPath(target)}
+                    className="rounded px-1 py-1 hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"
+                  >
+                    {part}
+                  </button>
+                </span>
+              );
             })}
           </nav>
         </div>
         <div className="max-h-[27rem] overflow-auto p-2">
-          {fileBrowserPath ? <button type="button" disabled={fileBusy} onClick={() => setFileBrowserPath(browserBreadcrumbs.slice(0, -1).join("/"))} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"><FolderOpen className="size-4 text-[#81ecec]" />..</button> : null}
+          {fileBrowserPath ? (
+            <button
+              type="button"
+              disabled={fileBusy}
+              onClick={() =>
+                setFileBrowserPath(browserBreadcrumbs.slice(0, -1).join("/"))
+              }
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"
+            >
+              <FolderOpen className="size-4 text-[#81ecec]" />
+              ..
+            </button>
+          ) : null}
           {fileBrowserEntries.map((entry) => {
             const label = entry.path.split("/").at(-1) ?? entry.path;
             const selected = entry.kind === "f" && filePath === entry.path;
-            return <button type="button" key={entry.path} disabled={fileBusy} onClick={() => entry.kind === "d" ? setFileBrowserPath(entry.path) : void openFile(entry.path)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors hover:bg-white/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec] disabled:opacity-60 ${selected ? "bg-[#81ecec]/15 text-[#b8ffff]" : "text-zinc-300"}`}>
-              {entry.kind === "d" ? <Folder className="size-4 shrink-0 text-[#81ecec]" /> : <File className="size-4 shrink-0 text-zinc-500" />}<span className="min-w-0 flex-1 truncate">{label}</span>{entry.kind === "d" ? <ChevronRight className="size-3 shrink-0 text-zinc-600" /> : <span className="shrink-0 text-[10px] text-zinc-600">{entry.size < 1024 ? `${entry.size} B` : `${Math.ceil(entry.size / 1024)} KB`}</span>}
-            </button>;
+            return (
+              <button
+                type="button"
+                key={entry.path}
+                disabled={fileBusy}
+                onClick={() =>
+                  entry.kind === "d"
+                    ? setFileBrowserPath(entry.path)
+                    : void openFile(entry.path)
+                }
+                className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors hover:bg-white/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec] disabled:opacity-60 ${selected ? "bg-[#81ecec]/15 text-[#b8ffff]" : "text-zinc-300"}`}
+              >
+                {entry.kind === "d" ? (
+                  <Folder className="size-4 shrink-0 text-[#81ecec]" />
+                ) : (
+                  <File className="size-4 shrink-0 text-zinc-500" />
+                )}
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                {entry.kind === "d" ? (
+                  <ChevronRight className="size-3 shrink-0 text-zinc-600" />
+                ) : (
+                  <span className="shrink-0 text-[10px] text-zinc-600">
+                    {entry.size < 1024
+                      ? `${entry.size} B`
+                      : `${Math.ceil(entry.size / 1024)} KB`}
+                  </span>
+                )}
+              </button>
+            );
           })}
-          {!fileBusy && fileBrowserEntries.length === 0 ? <p className="px-2 py-8 text-center text-sm text-zinc-500">Dieser Ordner ist leer.</p> : null}
+          {!fileBusy && fileBrowserEntries.length === 0 ? (
+            <p className="px-2 py-8 text-center text-sm text-zinc-500">
+              Dieser Ordner ist leer.
+            </p>
+          ) : null}
         </div>
       </aside>
       <div className="min-w-0 rounded-xl border border-white/[0.08] bg-[#0b1217] p-3 sm:p-4">
         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-white/[0.08] pb-3">
-          <div className="min-w-0"><h3 className="text-sm font-medium text-zinc-100">Editor</h3><p className="mt-1 truncate font-mono text-xs text-zinc-500">{filePath ? `/data/${filePath}` : "Wähle links eine Datei aus."}</p></div>
-          {filePath ? <span className="rounded bg-white/[0.06] px-2 py-1 font-mono text-[11px] text-zinc-400">Textdatei</span> : null}
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-zinc-100">Editor</h3>
+            <p className="mt-1 truncate font-mono text-xs text-zinc-500">
+              {filePath ? `/data/${filePath}` : "Wähle links eine Datei aus."}
+            </p>
+          </div>
+          {filePath ? (
+            <span className="rounded bg-white/[0.06] px-2 py-1 font-mono text-[11px] text-zinc-400">
+              Textdatei
+            </span>
+          ) : null}
         </div>
-        <textarea value={fileContent} onChange={(event) => setFileContent(event.target.value)} disabled={!filePath || fileBusy} aria-label="Dateiinhalt" className="mt-3 h-[24rem] w-full resize-y rounded-lg border border-white/[0.1] bg-[#080d10] p-3 font-mono text-xs leading-5 text-zinc-100 outline-none focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30 disabled:cursor-not-allowed disabled:opacity-60" placeholder="Wähle links eine Datei aus, um sie zu bearbeiten." />
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">Speichern schreibt die Änderung direkt in die persistente Spielwelt.</p><Button size="sm" disabled={!filePath || fileBusy} onClick={async () => { const result = await runFileCommand("write", { path: filePath, content: fileContent }); if (result !== null) { setNotice("Datei wurde gespeichert."); await loadFiles(); } }}>{fileBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}Speichern</Button></div>
-        {fileError ? <p role="alert" className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200">{fileError}</p> : null}
+        <textarea
+          value={fileContent}
+          onChange={(event) => setFileContent(event.target.value)}
+          disabled={!filePath || fileBusy}
+          aria-label="Dateiinhalt"
+          className="mt-3 h-[24rem] w-full resize-y rounded-lg border border-white/[0.1] bg-[#080d10] p-3 font-mono text-xs leading-5 text-zinc-100 outline-none focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30 disabled:cursor-not-allowed disabled:opacity-60"
+          placeholder="Wähle links eine Datei aus, um sie zu bearbeiten."
+        />
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-zinc-500">
+            Speichern schreibt die Änderung direkt in die persistente Spielwelt.
+          </p>
+          <Button
+            size="sm"
+            disabled={!filePath || fileBusy}
+            onClick={async () => {
+              const result = await runFileCommand("write", {
+                path: filePath,
+                content: fileContent,
+              });
+              if (result !== null) {
+                setNotice("Datei wurde gespeichert.");
+                await loadFiles();
+              }
+            }}
+          >
+            {fileBusy ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : null}
+            Speichern
+          </Button>
+        </div>
+        {fileError ? (
+          <p
+            role="alert"
+            className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs text-red-200"
+          >
+            {fileError}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -366,88 +591,502 @@ export default function GameServersPage() {
     enabled: Boolean(selectedServerId),
     queryFn: async () => {
       const response = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/access`),
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/access`,
+        ),
         { credentials: "include" },
       );
-      if (!response.ok) throw new Error("Server-Zugriffe konnten nicht geladen werden");
+      if (!response.ok)
+        throw new Error("Server-Zugriffe konnten nicht geladen werden");
       return response.json();
     },
   });
   const saveGrant = useMutation({
     mutationFn: async () => {
-      if (!selectedServerId || !grantTarget) throw new Error("Kein Zugriffsziel ausgewaehlt");
-      const [subjectType, subjectId] = grantTarget.split(":", 2) as ["user" | "team", string];
+      if (!selectedServerId || !grantTarget)
+        throw new Error("Kein Zugriffsziel ausgewaehlt");
+      const [subjectType, subjectId] = grantTarget.split(":", 2) as [
+        "user" | "team",
+        string,
+      ];
       const response = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/access`),
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/access`,
+        ),
         {
-          method: "PUT", credentials: "include", headers: { "content-type": "application/json" },
+          method: "PUT",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({ subjectType, subjectId, role: grantRole }),
         },
       );
-      if (!response.ok) throw new Error("Zugriff konnte nicht gespeichert werden");
+      if (!response.ok)
+        throw new Error("Zugriff konnte nicht gespeichert werden");
     },
-    onSuccess: () => { setGrantTarget(""); void grants.refetch(); },
+    onSuccess: () => {
+      setGrantTarget("");
+      void grants.refetch();
+    },
   });
   const removeGrant = useMutation({
     mutationFn: async (grantId: string) => {
       const response = await fetch(
-        api(`/organizations/${orgSlug}/game-servers/${selectedServerId}/access/${grantId}`),
+        api(
+          `/organizations/${orgSlug}/game-servers/${selectedServerId}/access/${grantId}`,
+        ),
         { method: "DELETE", credentials: "include" },
       );
       if (!response.ok) throw new Error("Zugriff konnte nicht entfernt werden");
     },
     onSuccess: () => void grants.refetch(),
   });
-  const serverList = (servers.data?.length ?? 0) > 0 ? (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#172128]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
-        <div><h2 className="font-medium text-zinc-100">Deine Server</h2><p className="mt-1 text-sm text-zinc-500">Wähle einen Server für Konsole, Dateien und Zugriffe.</p></div>
-        <Button size="sm" variant="ghost" onClick={() => void servers.refetch()}><RefreshCw data-icon="inline-start" />Aktualisieren</Button>
-      </div>
-      <div className="hidden overflow-x-auto md:block">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-white/[0.08] text-xs uppercase tracking-wide text-zinc-500"><tr><th className="px-5 py-3 font-medium">Server</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">Version</th><th className="px-4 py-3 font-medium">Arbeitsspeicher</th><th className="px-4 py-3 font-medium">Adresse</th><th className="px-5 py-3 text-right font-medium">Aktionen</th></tr></thead>
-          <tbody className="divide-y divide-white/[0.06]">
-            {(servers.data ?? []).map((server) => <tr key={server.id} className={selectedServerId === server.id ? "bg-[#81ecec]/[0.06]" : "hover:bg-white/[0.025]"}>
-              <td className="px-5 py-4"><button type="button" onClick={() => openManagement(server.id)} className="flex min-w-0 items-center gap-3 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"><Gamepad2 className="size-4 shrink-0 text-[#81ecec]" /><span className="min-w-0"><span className="block truncate font-medium text-zinc-100">{server.name}</span><span className="mt-0.5 block text-xs text-zinc-500">Minecraft Java</span></span></button></td>
-              <td className="px-4 py-4"><ResourceStatusBadge status={server.status === "running" ? "healthy" : server.status} /></td>
-              <td className="px-4 py-4 font-mono text-xs text-zinc-300">{server.version}</td>
-              <td className="px-4 py-4 text-zinc-300">{server.memoryMib} MiB</td>
-              <td className="px-4 py-4 font-mono text-xs text-zinc-400">{server.status === "running" && server.runtimePort ? `:${server.runtimePort}` : "—"}</td>
-              <td className="px-5 py-4"><div className="flex justify-end gap-2"><Button size="sm" variant={server.status === "running" ? "outline" : "default"} disabled={action.isPending || server.status === "running"} onClick={() => action.mutate({ server, method: "start" })}><Play data-icon="inline-start" />Starten</Button><Button size="sm" variant="outline" disabled={action.isPending || server.status !== "running"} onClick={() => action.mutate({ server, method: "stop" })}><Square data-icon="inline-start" />Stoppen</Button></div></td>
-            </tr>)}
-          </tbody>
-        </table>
-      </div>
-      <div className="divide-y divide-white/[0.06] md:hidden">
-        {(servers.data ?? []).map((server) => <article key={server.id} className="px-4 py-4"><div className="flex items-start justify-between gap-3"><button type="button" onClick={() => openManagement(server.id)} className="min-w-0 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"><span className="block truncate font-medium text-zinc-100">{server.name}</span><span className="mt-1 block text-xs text-zinc-500">{server.version} · {server.memoryMib} MiB{server.status === "running" && server.runtimePort ? ` · :${server.runtimePort}` : ""}</span></button><ResourceStatusBadge status={server.status === "running" ? "healthy" : server.status} /></div><div className="mt-3 flex gap-2"><Button size="sm" disabled={action.isPending || server.status === "running"} onClick={() => action.mutate({ server, method: "start" })}><Play data-icon="inline-start" />Starten</Button><Button size="sm" variant="outline" disabled={action.isPending || server.status !== "running"} onClick={() => action.mutate({ server, method: "stop" })}><Square data-icon="inline-start" />Stoppen</Button><Button size="sm" variant="ghost" onClick={() => openManagement(server.id)}>Verwalten</Button></div></article>)}
-      </div>
-    </section>
-  ) : null;
+  const serverList =
+    (servers.data?.length ?? 0) > 0 ? (
+      <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#172128]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
+          <div>
+            <h2 className="font-medium text-zinc-100">Deine Server</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Wähle einen Server für Konsole, Dateien und Zugriffe.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void servers.refetch()}
+          >
+            <RefreshCw data-icon="inline-start" />
+            Aktualisieren
+          </Button>
+        </div>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-white/[0.08] text-xs uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Server</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Version</th>
+                <th className="px-4 py-3 font-medium">Arbeitsspeicher</th>
+                <th className="px-4 py-3 font-medium">Adresse</th>
+                <th className="px-5 py-3 text-right font-medium">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.06]">
+              {(servers.data ?? []).map((server) => (
+                <tr
+                  key={server.id}
+                  className={
+                    selectedServerId === server.id
+                      ? "bg-[#81ecec]/[0.06]"
+                      : "hover:bg-white/[0.025]"
+                  }
+                >
+                  <td className="px-5 py-4">
+                    <button
+                      type="button"
+                      onClick={() => openManagement(server.id)}
+                      className="flex min-w-0 items-center gap-3 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"
+                    >
+                      <Gamepad2 className="size-4 shrink-0 text-[#81ecec]" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-zinc-100">
+                          {server.name}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-zinc-500">
+                          Minecraft Java
+                        </span>
+                      </span>
+                    </button>
+                  </td>
+                  <td className="px-4 py-4">
+                    <ResourceStatusBadge
+                      status={
+                        server.status === "running" ? "healthy" : server.status
+                      }
+                    />
+                  </td>
+                  <td className="px-4 py-4 font-mono text-xs text-zinc-300">
+                    {server.version}
+                  </td>
+                  <td className="px-4 py-4 text-zinc-300">
+                    {server.memoryMib} MiB
+                  </td>
+                  <td className="px-4 py-4 font-mono text-xs text-zinc-400">
+                    {server.status === "running" && server.runtimePort
+                      ? `:${server.runtimePort}`
+                      : "—"}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant={
+                          server.status === "running" ? "outline" : "default"
+                        }
+                        disabled={
+                          action.isPending || server.status === "running"
+                        }
+                        onClick={() =>
+                          action.mutate({ server, method: "start" })
+                        }
+                      >
+                        <Play data-icon="inline-start" />
+                        Starten
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          action.isPending || server.status !== "running"
+                        }
+                        onClick={() =>
+                          action.mutate({ server, method: "stop" })
+                        }
+                      >
+                        <Square data-icon="inline-start" />
+                        Stoppen
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="divide-y divide-white/[0.06] md:hidden">
+          {(servers.data ?? []).map((server) => (
+            <article key={server.id} className="px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => openManagement(server.id)}
+                  className="min-w-0 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"
+                >
+                  <span className="block truncate font-medium text-zinc-100">
+                    {server.name}
+                  </span>
+                  <span className="mt-1 block text-xs text-zinc-500">
+                    {server.version} · {server.memoryMib} MiB
+                    {server.status === "running" && server.runtimePort
+                      ? ` · :${server.runtimePort}`
+                      : ""}
+                  </span>
+                </button>
+                <ResourceStatusBadge
+                  status={
+                    server.status === "running" ? "healthy" : server.status
+                  }
+                />
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={action.isPending || server.status === "running"}
+                  onClick={() => action.mutate({ server, method: "start" })}
+                >
+                  <Play data-icon="inline-start" />
+                  Starten
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={action.isPending || server.status !== "running"}
+                  onClick={() => action.mutate({ server, method: "stop" })}
+                >
+                  <Square data-icon="inline-start" />
+                  Stoppen
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => openManagement(server.id)}
+                >
+                  Verwalten
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    ) : null;
   const serverManagement = selectedServer ? (
     <section className="overflow-hidden rounded-2xl border border-[#81ecec]/30 bg-[#172128]">
       <header className="border-b border-white/[0.08] bg-[#121c22] px-5 py-5 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <button type="button" onClick={() => setSelectedServerId(null)} className="mb-3 inline-flex items-center gap-1 rounded text-xs text-zinc-500 hover:text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"><ChevronRight className="size-3 rotate-180" />Zur Übersicht</button>
-            <div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-xl font-semibold text-zinc-50">{selectedServer.name}</h2><ResourceStatusBadge status={selectedServer.status === "running" ? "healthy" : selectedServer.status} /></div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-zinc-400"><span>Minecraft Java {selectedServer.version}</span><span>{selectedServer.memoryMib} MiB Arbeitsspeicher</span><span>Persistente Spielwelt: /data</span></div>
+            <button
+              type="button"
+              onClick={() => setSelectedServerId(null)}
+              className="mb-3 inline-flex items-center gap-1 rounded text-xs text-zinc-500 hover:text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"
+            >
+              <ChevronRight className="size-3 rotate-180" />
+              Zur Übersicht
+            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="truncate text-xl font-semibold text-zinc-50">
+                {selectedServer.name}
+              </h2>
+              <ResourceStatusBadge
+                status={
+                  selectedServer.status === "running"
+                    ? "healthy"
+                    : selectedServer.status
+                }
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-zinc-400">
+              <span>Minecraft Java {selectedServer.version}</span>
+              <span>{selectedServer.memoryMib} MiB Arbeitsspeicher</span>
+              <span>Persistente Spielwelt: /data</span>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><Button size="sm" disabled={selectedServer.status === "running" || action.isPending} onClick={() => action.mutate({ server: selectedServer, method: "start" })}><Play data-icon="inline-start" />Starten</Button><Button size="sm" variant="outline" disabled={selectedServer.status !== "running" || action.isPending} onClick={() => action.mutate({ server: selectedServer, method: "stop" })}><Square data-icon="inline-start" />Stoppen</Button><Button size="icon" variant="ghost" aria-label="Serverstatus aktualisieren" onClick={() => void servers.refetch()}><RefreshCw /></Button></div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              disabled={selectedServer.status === "running" || action.isPending}
+              onClick={() =>
+                action.mutate({ server: selectedServer, method: "start" })
+              }
+            >
+              <Play data-icon="inline-start" />
+              Starten
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedServer.status !== "running" || action.isPending}
+              onClick={() =>
+                action.mutate({ server: selectedServer, method: "stop" })
+              }
+            >
+              <Square data-icon="inline-start" />
+              Stoppen
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Serverstatus aktualisieren"
+              onClick={() => void servers.refetch()}
+            >
+              <RefreshCw />
+            </Button>
+          </div>
         </div>
-        <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-white/[0.08] pt-4"><span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Minecraft-Adresse</span>{connectionAddress ? <div className="flex min-w-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-[#080d10] p-1"><code className="min-w-0 truncate px-2 font-mono text-sm text-emerald-200">{connectionAddress}</code><Button size="icon-xs" variant="ghost" aria-label="Joinsadresse kopieren" onClick={() => void copyConnectionAddress()}>{copiedAddress ? <Check className="text-emerald-300" /> : <Copy />}</Button></div> : <span className="text-sm text-zinc-500">Die Adresse wird nach dem erfolgreichen Start angezeigt.</span>}</div>
+        <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-white/[0.08] pt-4">
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Minecraft-Adresse
+          </span>
+          {connectionAddress ? (
+            <div className="flex min-w-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-[#080d10] p-1">
+              <code className="min-w-0 truncate px-2 font-mono text-sm text-emerald-200">
+                {connectionAddress}
+              </code>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Joinsadresse kopieren"
+                onClick={() => void copyConnectionAddress()}
+              >
+                {copiedAddress ? (
+                  <Check className="text-emerald-300" />
+                ) : (
+                  <Copy />
+                )}
+              </Button>
+            </div>
+          ) : (
+            <span className="text-sm text-zinc-500">
+              Die Adresse wird nach dem erfolgreichen Start angezeigt.
+            </span>
+          )}
+        </div>
       </header>
       <div className="p-5 sm:p-6">
-        <div className="flex flex-wrap gap-1 border-b border-white/[0.08] pb-3" role="tablist" aria-label="Server-Verwaltung">
-          <Button size="sm" role="tab" aria-selected={managementTab === "console"} variant={managementTab === "console" ? "default" : "ghost"} onClick={() => setManagementTab("console")}><Terminal data-icon="inline-start" />Konsole</Button>
-          <Button size="sm" role="tab" aria-selected={managementTab === "files"} variant={managementTab === "files" ? "default" : "ghost"} onClick={() => { setManagementTab("files"); void loadFiles(); }}><FolderTree data-icon="inline-start" />Dateien</Button>
-          <Button size="sm" role="tab" aria-selected={managementTab === "access"} variant={managementTab === "access" ? "default" : "ghost"} onClick={() => setManagementTab("access")}><ShieldCheck data-icon="inline-start" />Zugriff</Button>
+        <div
+          className="flex flex-wrap gap-1 border-b border-white/[0.08] pb-3"
+          role="tablist"
+          aria-label="Server-Verwaltung"
+        >
+          <Button
+            size="sm"
+            role="tab"
+            aria-selected={managementTab === "console"}
+            variant={managementTab === "console" ? "default" : "ghost"}
+            onClick={() => setManagementTab("console")}
+          >
+            <Terminal data-icon="inline-start" />
+            Konsole
+          </Button>
+          <Button
+            size="sm"
+            role="tab"
+            aria-selected={managementTab === "files"}
+            variant={managementTab === "files" ? "default" : "ghost"}
+            onClick={() => {
+              setManagementTab("files");
+              void loadFiles();
+            }}
+          >
+            <FolderTree data-icon="inline-start" />
+            Dateien
+          </Button>
+          <Button
+            size="sm"
+            role="tab"
+            aria-selected={managementTab === "access"}
+            variant={managementTab === "access" ? "default" : "ghost"}
+            onClick={() => setManagementTab("access")}
+          >
+            <ShieldCheck data-icon="inline-start" />
+            Zugriff
+          </Button>
         </div>
-        {managementTab === "console" ? <div className="mt-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="font-medium text-zinc-100">Live-Konsole</h3><p className="mt-1 text-sm text-zinc-500">Logs verfolgen und Minecraft-Befehle direkt an den laufenden Server senden.</p></div><span className="text-xs text-zinc-500">Aktualisiert alle 2,5 Sekunden</span></div><pre className="mt-4 max-h-[32rem] overflow-auto rounded-xl border border-white/[0.08] bg-[#080d10] p-4 font-mono text-xs leading-5 text-emerald-200">{consoleData.data?.logs || "Warte auf Server-Logs …"}</pre>{commandResult.data?.output || commandResult.data?.error ? <pre className="mt-3 overflow-auto rounded-xl border border-white/[0.08] bg-[#0b1217] p-3 font-mono text-xs text-zinc-200">{commandResult.data.error ?? commandResult.data.output}</pre> : null}<form className="mt-4 flex gap-2" onSubmit={(event) => { event.preventDefault(); if (consoleCommand.trim()) command.mutate(); }}><input name="minecraftCommand" autoComplete="off" value={consoleCommand} onChange={(event) => setConsoleCommand(event.target.value)} placeholder="say Hallo Welt" aria-label="Minecraft-Befehl" className="h-10 min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 font-mono text-sm text-zinc-100" /><Button type="submit" disabled={!consoleCommand.trim() || command.isPending}>{command.isPending ? <LoaderCircle className="animate-spin" /> : <Send data-icon="inline-start" />}Senden</Button></form>{command.error ? <p role="alert" className="mt-2 text-sm text-red-300">{command.error.message}</p> : null}</div> : null}
+        {managementTab === "console" ? (
+          <div className="mt-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="font-medium text-zinc-100">Live-Konsole</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Logs verfolgen und Minecraft-Befehle direkt im Terminal
+                  senden. Mit ↑ und ↓ navigierst du durch frühere Befehle.
+                </p>
+              </div>
+              <span className="text-xs text-zinc-500">
+                Aktualisiert alle 2,5 Sekunden
+              </span>
+            </div>
+            <XtermTerminal
+              className="mt-4 h-[32rem]"
+              minHeight={512}
+              ariaLabel="Minecraft-Serverkonsole"
+              value={[
+                consoleData.data?.logs,
+                commandResult.data?.error ?? commandResult.data?.output,
+              ]
+                .filter(Boolean)
+                .join("\n")}
+              placeholder="Warte auf Server-Logs …"
+              prompt="minecraft> "
+              disabled={command.isPending}
+              onCommand={(nextCommand) => command.mutate(nextCommand)}
+            />
+            {command.error ? (
+              <p role="alert" className="mt-2 text-sm text-red-300">
+                {command.error.message}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {managementTab === "files" ? fileManager : null}
-        {managementTab === "access" ? <div className="mt-5"><div><h3 className="font-medium text-zinc-100">Zugriffsverwaltung</h3><p className="mt-1 text-sm text-zinc-500">Viewer sehen Logs, Operatoren steuern Server und Konsole, Admins verwalten Zugriffe.</p></div>{grants.isError ? <p role="alert" className="mt-4 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-200">Diese Ansicht ist nur für Server-Admins verfügbar.</p> : null}<div className="mt-5 flex flex-wrap gap-2"><select value={grantTarget} onChange={(event) => setGrantTarget(event.target.value)} className="h-9 min-w-52 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-sm text-zinc-100"><option value="">Person oder Team wählen</option>{(members.data ?? []).map((member) => <option key={`user:${member.userId}`} value={`user:${member.userId}`}>Person: {member.name || member.email}</option>)}{(teams.data ?? []).map((team) => <option key={`team:${team.id}`} value={`team:${team.id}`}>Team: {team.name}</option>)}</select><select value={grantRole} onChange={(event) => setGrantRole(event.target.value as AccessGrant["role"])} className="h-9 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-sm text-zinc-100"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option></select><Button size="sm" disabled={!grants.isSuccess || !grantTarget || saveGrant.isPending} onClick={() => saveGrant.mutate()}>{saveGrant.isPending ? <LoaderCircle className="animate-spin" /> : null}Zugriff geben</Button></div>{saveGrant.error || removeGrant.error ? <p role="alert" className="mt-3 text-sm text-red-300">{saveGrant.error?.message ?? removeGrant.error?.message}</p> : null}<div className="mt-5 divide-y divide-white/[0.06] border-y border-white/[0.08]">{(grants.data ?? []).map((grant) => <div key={grant.id} className="flex items-center justify-between gap-3 px-3 py-3 text-sm text-zinc-200"><span className="min-w-0 truncate">{grant.subjectType === "team" ? `Team: ${grant.teamName}` : grant.userName || grant.userEmail}<span className="ml-2 text-zinc-500">{grant.role}</span></span><Button size="sm" variant="ghost" disabled={removeGrant.isPending} onClick={() => removeGrant.mutate(grant.id)}>Entfernen</Button></div>)}</div></div> : null}
+        {managementTab === "access" ? (
+          <div className="mt-5">
+            <div>
+              <h3 className="font-medium text-zinc-100">Zugriffsverwaltung</h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                Viewer sehen Logs, Operatoren steuern Server und Konsole, Admins
+                verwalten Zugriffe.
+              </p>
+            </div>
+            {grants.isError ? (
+              <p
+                role="alert"
+                className="mt-4 rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-200"
+              >
+                Diese Ansicht ist nur für Server-Admins verfügbar.
+              </p>
+            ) : null}
+            <div className="mt-5 flex flex-wrap gap-2">
+              <select
+                value={grantTarget}
+                onChange={(event) => setGrantTarget(event.target.value)}
+                className="h-9 min-w-52 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-sm text-zinc-100"
+              >
+                <option value="">Person oder Team wählen</option>
+                {(members.data ?? []).map((member) => (
+                  <option
+                    key={`user:${member.userId}`}
+                    value={`user:${member.userId}`}
+                  >
+                    Person: {member.name || member.email}
+                  </option>
+                ))}
+                {(teams.data ?? []).map((team) => (
+                  <option key={`team:${team.id}`} value={`team:${team.id}`}>
+                    Team: {team.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={grantRole}
+                onChange={(event) =>
+                  setGrantRole(event.target.value as AccessGrant["role"])
+                }
+                className="h-9 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-sm text-zinc-100"
+              >
+                <option value="viewer">Viewer</option>
+                <option value="operator">Operator</option>
+                <option value="admin">Admin</option>
+              </select>
+              <Button
+                size="sm"
+                disabled={
+                  !grants.isSuccess || !grantTarget || saveGrant.isPending
+                }
+                onClick={() => saveGrant.mutate()}
+              >
+                {saveGrant.isPending ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : null}
+                Zugriff geben
+              </Button>
+            </div>
+            {saveGrant.error || removeGrant.error ? (
+              <p role="alert" className="mt-3 text-sm text-red-300">
+                {saveGrant.error?.message ?? removeGrant.error?.message}
+              </p>
+            ) : null}
+            <div className="mt-5 divide-y divide-white/[0.06] border-y border-white/[0.08]">
+              {(grants.data ?? []).map((grant) => (
+                <div
+                  key={grant.id}
+                  className="flex items-center justify-between gap-3 px-3 py-3 text-sm text-zinc-200"
+                >
+                  <span className="min-w-0 truncate">
+                    {grant.subjectType === "team"
+                      ? `Team: ${grant.teamName}`
+                      : grant.userName || grant.userEmail}
+                    <span className="ml-2 text-zinc-500">{grant.role}</span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={removeGrant.isPending}
+                    onClick={() => removeGrant.mutate(grant.id)}
+                  >
+                    Entfernen
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] px-5 py-4 sm:px-6"><div><h3 className="text-sm font-medium text-zinc-300">Gefahrenbereich</h3><p className="mt-1 text-xs text-zinc-500">Löschen entfernt Server und Spielwelt dauerhaft.</p></div><Button size="sm" variant="destructive" onClick={() => setPendingDelete(selectedServer)}><Trash2 data-icon="inline-start" />Server löschen</Button></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] px-5 py-4 sm:px-6">
+        <div>
+          <h3 className="text-sm font-medium text-zinc-300">Gefahrenbereich</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Löschen entfernt Server und Spielwelt dauerhaft.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => setPendingDelete(selectedServer)}
+        >
+          <Trash2 data-icon="inline-start" />
+          Server löschen
+        </Button>
+      </footer>
     </section>
   ) : null;
   return (
@@ -459,103 +1098,228 @@ export default function GameServersPage() {
             description="Minecraft-Java-Server betreiben, verbinden und verwalten."
           />
         </div>
-        <Button size="lg" onClick={() => setIsCreateOpen((open) => !open)} aria-expanded={isCreateOpen}>
+        <Button
+          size="lg"
+          onClick={() => setIsCreateOpen((open) => !open)}
+          aria-expanded={isCreateOpen}
+        >
           <Plus data-icon="inline-start" />
           Server erstellen
         </Button>
       </div>
-      {nodes.isSuccess && !nodes.data.some((node) => node.status === "ready" && node.schedulingEnabled) ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-          <span>Die lokale Hardware wird gerade vorbereitet. Starte den Server erneut, sobald sie als bereit angezeigt wird.</span>
-          <Button asChild size="sm" variant="outline" className="min-h-10"><Link href={`/${orgSlug}/hardware`}>Hardware öffnen</Link></Button>
+      {nodes.isSuccess &&
+      !nodes.data.some(
+        (node) => node.status === "ready" && node.schedulingEnabled,
+      ) ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100"
+        >
+          <span>
+            Die lokale Hardware wird gerade vorbereitet. Starte den Server
+            erneut, sobald sie als bereit angezeigt wird.
+          </span>
+          <Button asChild size="sm" variant="outline" className="min-h-10">
+            <Link href={`/${orgSlug}/hardware`}>Hardware öffnen</Link>
+          </Button>
         </div>
       ) : null}
       {notice ? (
-        <div role="status" aria-live="polite" className="flex items-center justify-between gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center justify-between gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200"
+        >
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} className="rounded px-2 py-1 text-xs font-medium hover:bg-emerald-400/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200">Schließen</button>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="rounded px-2 py-1 text-xs font-medium hover:bg-emerald-400/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-200"
+          >
+            Schließen
+          </button>
         </div>
       ) : null}
-      {isCreateOpen ? <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
-        <div className="mb-4">
-          <h2 className="font-medium text-zinc-100">Neuen Server erstellen</h2>
-          <p className="mt-1 text-sm text-zinc-500">Projekt, Name und Minecraft-Version festlegen.</p>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <select
-           name="projectId"
-           aria-label="Projekt"
-           autoComplete="off"
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
-          className="h-9 min-w-48 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100"
-        >
-          <option value="">Projekt wählen</option>
-          {(projects.data ?? []).map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-        <label className="min-w-56 flex-1 text-sm text-zinc-300">
-          <span className="mb-1 block">Servername</span>
-          <input
-            name="serverName"
-            autoComplete="off"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Mein Minecraft-Server"
-            aria-invalid={name.length > 80}
-            className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
-          />
-          {name.length > 80 ? <span className="mt-1 flex items-center gap-1 text-xs text-red-300"><CircleAlert className="size-3" />Maximal 80 Zeichen</span> : null}
-        </label>
-        <label className="text-sm text-zinc-300"><span className="mb-1 block">Minecraft-Version</span><input
-          name="minecraftVersion"
-          autoComplete="off"
-          value={version}
-          onChange={(event) => setVersion(event.target.value)}
-          list="minecraft-versions"
-          aria-label="Minecraft-Version"
-          className="h-10 w-44 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
-        /></label>
-        <datalist id="minecraft-versions">
-          {minecraftVersions.map((minecraftVersion) => (
-            <option key={minecraftVersion.id} value={minecraftVersion.id} label={minecraftVersion.type} />
-          ))}
-        </datalist>
-        <Button
-          className="h-10"
-          disabled={!name.trim() || name.length > 80 || !projectId || create.isPending}
-          onClick={() => create.mutate()}
-        >
-          {create.isPending ? <LoaderCircle className="mr-1 size-3.5 animate-spin" /> : <Plus className="mr-1 size-3.5" />}
-          {create.isPending ? "Erstellt ..." : "Server erstellen"}
-        </Button>
-        </div>
-        {create.error ? <p className="mt-3 text-sm text-red-300">{create.error.message}</p> : null}
-      </section> : null}
+      {isCreateOpen ? (
+        <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
+          <div className="mb-4">
+            <h2 className="font-medium text-zinc-100">
+              Neuen Server erstellen
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Projekt, Name und Minecraft-Version festlegen.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <select
+              name="projectId"
+              aria-label="Projekt"
+              autoComplete="off"
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+              className="h-9 min-w-48 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100"
+            >
+              <option value="">Projekt wählen</option>
+              {(projects.data ?? []).map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <label className="min-w-56 flex-1 text-sm text-zinc-300">
+              <span className="mb-1 block">Servername</span>
+              <input
+                name="serverName"
+                autoComplete="off"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Mein Minecraft-Server"
+                aria-invalid={name.length > 80}
+                className="h-10 w-full rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
+              />
+              {name.length > 80 ? (
+                <span className="mt-1 flex items-center gap-1 text-xs text-red-300">
+                  <CircleAlert className="size-3" />
+                  Maximal 80 Zeichen
+                </span>
+              ) : null}
+            </label>
+            <label className="text-sm text-zinc-300">
+              <span className="mb-1 block">Minecraft-Version</span>
+              <input
+                name="minecraftVersion"
+                autoComplete="off"
+                value={version}
+                onChange={(event) => setVersion(event.target.value)}
+                list="minecraft-versions"
+                aria-label="Minecraft-Version"
+                className="h-10 w-44 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 outline-none transition focus-visible:border-[#81ecec] focus-visible:ring-2 focus-visible:ring-[#81ecec]/30"
+              />
+            </label>
+            <datalist id="minecraft-versions">
+              {minecraftVersions.map((minecraftVersion) => (
+                <option
+                  key={minecraftVersion.id}
+                  value={minecraftVersion.id}
+                  label={minecraftVersion.type}
+                />
+              ))}
+            </datalist>
+            <Button
+              className="h-10"
+              disabled={
+                !name.trim() ||
+                name.length > 80 ||
+                !projectId ||
+                create.isPending
+              }
+              onClick={() => create.mutate()}
+            >
+              {create.isPending ? (
+                <LoaderCircle className="mr-1 size-3.5 animate-spin" />
+              ) : (
+                <Plus className="mr-1 size-3.5" />
+              )}
+              {create.isPending ? "Erstellt ..." : "Server erstellen"}
+            </Button>
+          </div>
+          {create.error ? (
+            <p className="mt-3 text-sm text-red-300">{create.error.message}</p>
+          ) : null}
+        </section>
+      ) : null}
       {servers.isLoading ? (
         <p className="text-sm text-zinc-500">Server werden geladen …</p>
       ) : null}
-      {servers.isError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200"><span>{servers.error.message}</span><Button size="sm" variant="outline" className="min-h-10" onClick={() => void servers.refetch()}>Erneut versuchen</Button></div> : null}
-      {action.error ? <p className="rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">{action.error.message}</p> : null}
+      {servers.isError ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200"
+        >
+          <span>{servers.error.message}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="min-h-10"
+            onClick={() => void servers.refetch()}
+          >
+            Erneut versuchen
+          </Button>
+        </div>
+      ) : null}
+      {action.error ? (
+        <p className="rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">
+          {action.error.message}
+        </p>
+      ) : null}
       {serverList}
-      {!servers.isLoading && !servers.isError && (servers.data?.length ?? 0) === 0 ? <DesignEmptyState icon={Gamepad2} title="Noch keine Minecraft-Server" description="Erstelle den ersten Server und ordne ihn einem Projekt zu." detail="Der Server wird anschließend automatisch auf einem passenden Node bereitgestellt." /> : null}
+      {!servers.isLoading &&
+      !servers.isError &&
+      (servers.data?.length ?? 0) === 0 ? (
+        <DesignEmptyState
+          icon={Gamepad2}
+          title="Noch keine Minecraft-Server"
+          description="Erstelle den ersten Server und ordne ihn einem Projekt zu."
+          detail="Der Server wird anschließend automatisch auf einem passenden Node bereitgestellt."
+        />
+      ) : null}
       {serverManagement}
       {pendingDelete ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" role="presentation">
-          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-server-title" aria-describedby="delete-server-description" className="w-full max-w-md rounded-2xl border border-red-400/30 bg-[#172128] p-6 shadow-2xl">
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+          role="presentation"
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-server-title"
+            aria-describedby="delete-server-description"
+            className="w-full max-w-md rounded-2xl border border-red-400/30 bg-[#172128] p-6 shadow-2xl"
+          >
             <div className="flex items-start gap-3">
-              <CircleAlert className="mt-0.5 size-5 shrink-0 text-red-300" aria-hidden="true" />
+              <CircleAlert
+                className="mt-0.5 size-5 shrink-0 text-red-300"
+                aria-hidden="true"
+              />
               <div className="min-w-0">
-                <h2 id="delete-server-title" className="font-semibold text-zinc-100">Server löschen?</h2>
-                <p id="delete-server-description" className="mt-2 text-sm leading-6 text-zinc-400">{pendingDelete.name} und die zugehörige Spielwelt werden dauerhaft entfernt. Diese Aktion kann nicht rückgängig gemacht werden.</p>
+                <h2
+                  id="delete-server-title"
+                  className="font-semibold text-zinc-100"
+                >
+                  Server löschen?
+                </h2>
+                <p
+                  id="delete-server-description"
+                  className="mt-2 text-sm leading-6 text-zinc-400"
+                >
+                  {pendingDelete.name} und die zugehörige Spielwelt werden
+                  dauerhaft entfernt. Diese Aktion kann nicht rückgängig gemacht
+                  werden.
+                </p>
               </div>
             </div>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button variant="outline" className="min-h-11" disabled={action.isPending} onClick={() => setPendingDelete(null)}>Abbrechen</Button>
-              <Button variant="destructive" className="min-h-11" disabled={action.isPending} onClick={() => action.mutate({ server: pendingDelete, method: "delete" }, { onSuccess: () => setPendingDelete(null) })}>{action.isPending ? "Löscht ..." : "Endgültig löschen"}</Button>
+              <Button
+                variant="outline"
+                className="min-h-11"
+                disabled={action.isPending}
+                onClick={() => setPendingDelete(null)}
+              >
+                Abbrechen
+              </Button>
+              <Button
+                variant="destructive"
+                className="min-h-11"
+                disabled={action.isPending}
+                onClick={() =>
+                  action.mutate(
+                    { server: pendingDelete, method: "delete" },
+                    { onSuccess: () => setPendingDelete(null) },
+                  )
+                }
+              >
+                {action.isPending ? "Löscht ..." : "Endgültig löschen"}
+              </Button>
             </div>
           </section>
         </div>

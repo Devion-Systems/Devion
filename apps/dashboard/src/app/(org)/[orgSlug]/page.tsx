@@ -1,7 +1,18 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, Database, GitBranch, Plus, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  AppWindow,
+  ArrowRight,
+  CheckCircle2,
+  Database,
+  Gamepad2,
+  GitBranch,
+  Plus,
+  RefreshCw,
+  Server,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { DesignEmptyState } from "@/components/layout/design-empty-state";
@@ -15,6 +26,12 @@ type DashboardData = {
   domains: number;
   allocated: { cpuMillicores: number; memoryMib: number; storageGib: number };
   recentProjects: { id: string; name: string; slug: string; status: string; branch: string; updatedAt: string }[];
+};
+
+type RuntimeData = {
+  applications: { status: string }[];
+  gameServers: { status: string }[];
+  nodes: { status: string; schedulingEnabled: boolean }[];
 };
 
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
@@ -37,11 +54,61 @@ export default function OrgOverviewPage() {
       return response.json();
     },
   });
+  const runtime = useQuery<RuntimeData>({
+    queryKey: ["orgs", orgSlug, "runtime-summary"],
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const paths = [
+        `/organizations/${orgSlug}/applications`,
+        `/organizations/${orgSlug}/game-servers`,
+        `/organizations/${orgSlug}/nodes`,
+      ];
+      const responses = await Promise.all(
+        paths.map((path) => fetch(api(path), { credentials: "include" })),
+      );
+      if (responses.some((response) => !response.ok)) {
+        throw new Error("Runtime-Status nicht verfügbar");
+      }
+      const [applications, gameServers, nodes] = await Promise.all(
+        responses.map((response) => response.json()),
+      );
+      return { applications, gameServers, nodes } as RuntimeData;
+    },
+  });
 
   const failedDatabases = data?.databases.failed ?? 0;
   const projectTotal = data?.projects.total ?? 0;
   const healthyProjects = data?.projects.healthy ?? 0;
   const hasAttention = failedDatabases > 0;
+  const runtimeCards = [
+    {
+      label: "Anwendungen",
+      href: `/${orgSlug}/applications`,
+      icon: AppWindow,
+      total: runtime.data?.applications.length ?? 0,
+      active: runtime.data?.applications.filter((item) => item.status === "running").length ?? 0,
+      activeLabel: "laufend",
+      problem: runtime.data?.applications.filter((item) => ["failed", "error"].includes(item.status)).length ?? 0,
+    },
+    {
+      label: "Game Server",
+      href: `/${orgSlug}/game-servers`,
+      icon: Gamepad2,
+      total: runtime.data?.gameServers.length ?? 0,
+      active: runtime.data?.gameServers.filter((item) => item.status === "running").length ?? 0,
+      activeLabel: "online",
+      problem: runtime.data?.gameServers.filter((item) => item.status === "failed").length ?? 0,
+    },
+    {
+      label: "Nodes",
+      href: `/${orgSlug}/hardware`,
+      icon: Server,
+      total: runtime.data?.nodes.length ?? 0,
+      active: runtime.data?.nodes.filter((item) => item.status === "ready" && item.schedulingEnabled).length ?? 0,
+      activeLabel: "bereit",
+      problem: runtime.data?.nodes.filter((item) => item.status !== "ready").length ?? 0,
+    },
+  ];
 
   return (
     <main className="flex flex-col gap-6 p-5 sm:p-7">
@@ -67,6 +134,28 @@ export default function OrgOverviewPage() {
             <div><dt className="text-xs text-zinc-500">Datenbanken</dt><dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-zinc-100">{isLoading ? "—" : formatNumber.format(data?.databases.total ?? 0)}</dd></div>
             <div><dt className="text-xs text-zinc-500">Domains</dt><dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-zinc-100">{isLoading ? "—" : formatNumber.format(data?.domains ?? 0)}</dd></div>
           </dl>
+        </div>
+      </section>
+
+      <section aria-labelledby="runtime-title">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="runtime-title" className="font-medium text-zinc-100">Runtime</h2>
+            <p className="mt-1 text-sm text-zinc-500">Aktueller Zustand der Workloads und ausführenden Hardware.</p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>{runtime.isFetching ? "Wird aktualisiert …" : "Aktualisiert alle 15 Sekunden"}</span>
+            <Button size="icon-xs" variant="ghost" aria-label="Runtime-Status aktualisieren" onClick={() => void runtime.refetch()} disabled={runtime.isFetching}>
+              <RefreshCw className={runtime.isFetching ? "animate-spin" : ""} />
+            </Button>
+          </div>
+        </div>
+        {runtime.isError ? <div role="alert" className="mb-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-100">Der Runtime-Status konnte nicht vollständig geladen werden.</div> : null}
+        <div className="grid gap-3 md:grid-cols-3">
+          {runtimeCards.map((card) => {
+            const Icon = card.icon;
+            return <Link key={card.label} href={card.href} className="group rounded-2xl border border-white/[0.08] bg-[#172128] p-4 transition hover:border-[#00cec9]/35 hover:bg-[#19252c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#81ecec]"><div className="flex items-start justify-between gap-3"><span className="grid size-9 place-items-center rounded-xl border border-[#00cec9]/15 bg-[#00cec9]/[0.06]"><Icon className="size-4 text-[#81ecec]" /></span><ArrowRight className="size-4 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-[#81ecec]" /></div><div className="mt-5 flex items-end justify-between gap-3"><div><p className="text-sm font-medium text-zinc-200">{card.label}</p><p className="mt-1 text-xs text-zinc-500">{runtime.isLoading ? "Status wird geladen …" : `${card.active} ${card.activeLabel}`}</p></div><p className="font-mono text-2xl font-semibold tabular-nums text-zinc-100">{runtime.isLoading ? "—" : card.total}</p></div>{!runtime.isLoading && card.problem > 0 ? <p className="mt-3 flex items-center gap-1.5 border-t border-white/[0.07] pt-3 text-xs text-amber-200"><TriangleAlert className="size-3.5" />{card.problem} mit Problemen</p> : null}</Link>;
+          })}
         </div>
       </section>
 

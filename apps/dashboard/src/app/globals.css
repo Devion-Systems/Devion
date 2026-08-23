@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@xterm/xterm/css/xterm.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -162,6 +163,14 @@
 }
 
 @layer utilities {
+  .xterm {
+    height: 100%;
+  }
+
+  .xterm .xterm-viewport {
+    scrollbar-color: rgb(129 236 236 / 35%) transparent;
+  }
+
   .devion-grid {
     background-image:
       linear-gradient(rgb(245 246 250 / 2.5%) 1px, transparent 1px),
