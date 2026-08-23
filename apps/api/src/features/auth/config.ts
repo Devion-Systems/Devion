@@ -61,6 +61,9 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
+    minPasswordLength: 12,
+    maxPasswordLength: 128,
+    revokeSessionsOnPasswordReset: true,
     requireEmailVerification: emailVerificationEnabled,
     autoSignInAfterVerification: true,
     sendResetPassword: async ({ user, url }) => {
@@ -100,6 +103,8 @@ export const auth = betterAuth({
     admin(),
     organization({
       creatorRole: "owner",
+      allowUserToCreateOrganization: async (candidate) =>
+        (candidate as { role?: string }).role === "admin",
       teams: { enabled: true, maximumTeams: 50, allowRemovingAllTeams: false },
       invitationExpiresIn: 60 * 60 * 48,
       cancelPendingInvitationsOnReInvite: true,

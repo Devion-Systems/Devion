@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { csrfOriginMiddleware } from "../middleware/csrf-origin.js";
 import type { AppEnv } from "../types/env.js";
-import { aiGatewayRoutes } from "./ai-gateway.routes.js";
-import { applicationRoutes } from "./applications.routes.js";
 import { adminOrganizationRoutes } from "./admin-organizations.routes.js";
+import { aiGatewayRoutes } from "./ai-gateway.routes.js";
 import { analyticsRoutes } from "./analytics.routes.js";
+import { applicationRoutes } from "./applications.routes.js";
 import { authRoutes } from "./auth.routes.js";
 import { dashboardTlsRoutes } from "./dashboard-tls.routes.js";
 import { environmentRoutes } from "./environments.routes.js";
@@ -14,6 +14,7 @@ import { healthRoutes } from "./health.routes.js";
 import { managedDatabaseRoutes } from "./managed-databases.routes.js";
 import { nodeRoutes } from "./nodes.routes.js";
 import { projectRoutes } from "./projects.routes.js";
+import { setupRoutes } from "./setup.routes.js";
 import { systemUpdateRoutes } from "./system-updates.routes.js";
 import { teamRoutes } from "./teams.routes.js";
 import { vmRoutes } from "./vms.routes.js";
@@ -31,6 +32,10 @@ routes.use("/api/admin/*", csrfOriginMiddleware());
 
 // Health checks (no /api prefix — exposed at root for probes)
 routes.route("/health", healthRoutes);
+
+// One-shot company bootstrap. Mutations are origin checked like auth routes.
+routes.use("/api/setup/*", csrfOriginMiddleware());
+routes.route("/api/setup", setupRoutes);
 
 // Auth (better-auth catch-all)
 routes.route("/api/auth", authRoutes);

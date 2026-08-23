@@ -23,6 +23,14 @@ const coreEnvSchema = z.object({
     .trim()
     .transform((value) => value || undefined)
     .optional(),
+  // Strongly recommended for internet-facing first boot. The value is only
+  // accepted by the one-shot installation endpoint and is never persisted.
+  DEVION_SETUP_TOKEN: z
+    .string()
+    .trim()
+    .transform((value) => value || undefined)
+    .pipe(z.string().min(16).max(256).optional())
+    .optional(),
   // SMTP / Email-Service (optional – wird per Feature-Flag gesteuert)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),
@@ -38,16 +46,16 @@ const coreEnvSchema = z.object({
 export type CoreEnv = z.infer<typeof coreEnvSchema>;
 
 type EnvironmentSchema = {
-  safeParse(input: unknown):
+  safeParse(
+    input: unknown,
+  ):
     | { success: true; data: Record<string, unknown> }
     | { success: false; error: { format(): unknown } };
 };
 
 type SchemaOutput<T> = T extends { _output: infer Output } ? Output : Record<string, never>;
 
-export function parseEnv<T = Record<string, never>>(
-  extendedSchema?: T,
-): CoreEnv & SchemaOutput<T> {
+export function parseEnv<T = Record<string, never>>(extendedSchema?: T): CoreEnv & SchemaOutput<T> {
   const coreResult = coreEnvSchema.safeParse(process.env);
 
   if (!coreResult.success) {

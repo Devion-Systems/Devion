@@ -11,6 +11,7 @@ const SESSION_COOKIE_NAMES = [
 const PUBLIC_PATHS = [
   "/login",
   "/register",
+  "/setup",
   "/forgot-password",
   "/reset-password",
   "/verify-email",
@@ -19,8 +20,11 @@ const PUBLIC_PATHS = [
 
 export function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  if (path === "/register") {
+    return NextResponse.redirect(new URL("/setup", request.url));
+  }
   const hasSessionCookie = SESSION_COOKIE_NAMES.some((name) =>
-    Boolean(request.cookies.get(name)?.value)
+    Boolean(request.cookies.get(name)?.value),
   );
   const isPublicPath =
     path === "/" ||

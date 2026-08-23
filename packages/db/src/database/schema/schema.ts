@@ -1,11 +1,12 @@
-import { boolean, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { organization, user } from "./auth.js";
 import { timestamps } from "./timestamp.js";
 
 export * from "./auth.js";
-export * from "./projects.js";
+export * from "./control-plane.js";
 export * from "./managed-databases.js";
 export * from "./personal.js";
-export * from "./control-plane.js";
+export * from "./projects.js";
 
 export const DEVION_DIR = ".devion";
 export const ACTION_FILES = [`${DEVION_DIR}/action.yml`, `${DEVION_DIR}/action.yaml`] as const;
@@ -34,6 +35,24 @@ export const system_feature_log = pgTable("system_feature_log", {
     .references(() => system_feature.id, { onDelete: "cascade" }),
   action: varchar().notNull(),
   ...timestamps,
+});
+
+/** Singleton written only by the one-shot company installation flow. */
+export const systemInstallation = pgTable("system_installation", {
+  id: integer("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "restrict" }),
+  administratorId: text("administrator_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "restrict" }),
+  companyName: text("company_name").notNull(),
+  primaryDomain: text("primary_domain"),
+  ldapEnabled: boolean("ldap_enabled").default(false).notNull(),
+  ldapConfigEncrypted: text("ldap_config_encrypted"),
+  settings: jsonb("settings").$type<Record<string, unknown>>().default({}).notNull(),
+  installedAt: timestamp("installed_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const buildQueue = pgTable("build_queue", {

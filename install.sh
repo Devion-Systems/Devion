@@ -114,6 +114,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   info "Erzeuge Produktionskonfiguration"
   db_password="$(secret)"
   auth_secret="$(secret)"
+  setup_token="$(secret)"
   storage_secret="$(secret)"
   cat > "$ENV_FILE" <<EOF
 POSTGRES_DB=devion
@@ -121,6 +122,7 @@ POSTGRES_USER=devion
 POSTGRES_PASSWORD=$db_password
 DATABASE_URL=postgres://devion:$db_password@postgres:5432/devion
 BETTER_AUTH_SECRET=$auth_secret
+DEVION_SETUP_TOKEN=$setup_token
 HOST_IP=$HOST_IP
 BETTER_AUTH_URL=http://$HOST_IP
 BETTER_AUTH_TRUSTED_ORIGINS=http://$HOST_IP
@@ -171,6 +173,7 @@ fi
 ensure_env_value "BETTER_AUTH_COOKIE_DOMAIN" ""
 ensure_env_value "TRAEFIK_CNAME_TARGET" ""
 ensure_env_value "DEVION_LOCAL_AGENT_TOKEN" "$(secret)"
+ensure_env_value "DEVION_SETUP_TOKEN" "$(secret)"
 
 info "Bereite Traefik-Verzeichnisse vor"
 install -d -m 700 "$INSTALL_DIR/data/traefik/dynamic" "$INSTALL_DIR/data/traefik/certs" "$INSTALL_DIR/data/traefik/acme"
@@ -222,4 +225,5 @@ curl --noproxy "*" --fail --silent --show-error \
   || fail "Dashboard wurde nicht gesund. Logs: docker compose -f $INSTALL_DIR/deploy/docker/docker-compose.yml logs dashboard traefik"
 
 info "Installation erfolgreich"
-printf 'Dashboard: http://%s:%s\nAPI health: http://%s:%s/health\n' "$HOST_IP" "$HTTP_PORT" "$HOST_IP" "$HTTP_PORT"
+setup_token="$(sed -n 's/^DEVION_SETUP_TOKEN=//p' "$ENV_FILE" | head -n 1)"
+printf 'Setup: http://%s:%s/setup\nInstallations-Token: %s\nDashboard: http://%s:%s\nAPI health: http://%s:%s/health\n' "$HOST_IP" "$HTTP_PORT" "$setup_token" "$HOST_IP" "$HTTP_PORT" "$HOST_IP" "$HTTP_PORT"

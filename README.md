@@ -47,7 +47,7 @@ Install the current main branch:
 curl -fsSL https://raw.githubusercontent.com/Devion-Systems/Devion/main/install.sh | sudo bash
 ```
 
-The installer clones Devion to `/opt/devion`, generates local secrets, starts the platform services, applies migrations, and verifies the API health check. It displays the dashboard URL based on the host's detected LAN IP.
+The installer clones Devion to `/opt/devion`, generates local secrets, starts the platform services, applies migrations, and verifies the API health check. It displays the one-time company setup URL and installation token together with the dashboard URL based on the host's detected LAN IP. The setup creates the licensed company workspace and its first platform administrator; public registration is closed afterwards. A primary domain and encrypted LDAP connection settings are optional.
 
 To install a fork instead:
 
