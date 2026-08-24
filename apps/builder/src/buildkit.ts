@@ -9,7 +9,7 @@ type BuildStep = Extract<WorkflowStep, { build: unknown }>;
 export async function executeBuildKit(
   step: BuildStep,
   options: { workspace: string; address: string; context: Record<string, string>; secrets: Record<string, string>; signal: AbortSignal; log: (stream: "stdout" | "stderr", line: string) => void },
-): Promise<void> {
+): Promise<{ tags: string[]; digest?: string }> {
   const contextPath = safePath(options.workspace, step.build.context);
   const dockerfilePath = safePath(options.workspace, step.build.dockerfile);
   const args = [
@@ -18,6 +18,8 @@ export async function executeBuildKit(
     "--opt", `filename=${dockerfilePath.split(/[\\/]/).at(-1) ?? "Dockerfile"}`,
     "--opt", `platform=${step.build.platforms.join(",")}`,
   ];
+  const metadataFile = resolve(options.workspace, ".devion-buildkit-metadata.json");
+  args.push("--metadata-file", metadataFile);
   if (step.build.target) args.push("--opt", `target=${step.build.target}`);
   for (const [key, value] of Object.entries(step.build.args)) args.push("--opt", `build-arg:${key}=${interpolate(value, options.context)}`);
   for (const cache of step.build.cacheFrom) args.push("--import-cache", interpolate(cache, options.context));
@@ -33,10 +35,15 @@ export async function executeBuildKit(
     args.push("--secret", `id=${id},src=${file}`);
   }
   const tags = step.build.tags.map((tag) => interpolate(tag, options.context));
-  args.push("--output", step.build.push ? `type=image,name=${tags.join(",")},push=true` : "type=oci,dest=image.tar");
+  args.push("--output", step.build.push ? `type=image,name=${tags.join(",")},push=true${step.build.insecureRegistry ? ",registry.insecure=true" : ""}` : "type=oci,dest=image.tar");
   try {
     const result = await runProcess(args, { cwd: options.workspace, signal: options.signal, onStdout: (line) => options.log("stdout", line), onStderr: (line) => options.log("stderr", line) });
     if (result.exitCode !== 0) throw new Error(`BuildKit exited with code ${result.exitCode}`);
+    const metadata = await Bun.file(metadataFile).json().catch(() => ({})) as Record<string, unknown>;
+    const digest = metadata["containerimage.digest"];
+    return typeof digest === "string" && /^sha256:[a-f0-9]{64}$/.test(digest)
+      ? { tags, digest }
+      : { tags };
   } finally {
     await rm(secretDirectory, { recursive: true, force: true });
   }

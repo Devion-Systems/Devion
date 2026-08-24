@@ -6,6 +6,7 @@ import { aiGatewayRoutes } from "./ai-gateway.routes.js";
 import { analyticsRoutes } from "./analytics.routes.js";
 import { applicationRoutes } from "./applications.routes.js";
 import { authRoutes } from "./auth.routes.js";
+import { buildRoutes } from "./builds.routes.js";
 import { dashboardTlsRoutes } from "./dashboard-tls.routes.js";
 import { environmentRoutes } from "./environments.routes.js";
 import { featureRoutes } from "./features.routes.js";
@@ -57,6 +58,7 @@ routes.route("/", nodeRoutes);
 // Organization-scoped application resources
 routes.route("/organizations", projectRoutes);
 routes.route("/organizations", applicationRoutes);
+routes.route("/organizations", buildRoutes);
 routes.route("/organizations", environmentRoutes);
 routes.route("/organizations", gameServerRoutes);
 routes.route("/organizations", managedDatabaseRoutes);

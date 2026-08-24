@@ -46,12 +46,17 @@ export class PostgresRunRepository implements RunRepository {
   }
 
   async heartbeat(id: string, workerId: string, leaseSeconds: number): Promise<boolean> {
-    const rows = await this.sql`UPDATE builder_runs SET lease_expires_at = now() + (${leaseSeconds} * interval '1 second') WHERE id = ${id} AND worker_id = ${workerId} AND status = 'running' RETURNING id`;
+    const rows = await this.sql`UPDATE builder_runs SET lease_expires_at = now() + (${leaseSeconds} * interval '1 second') WHERE id = ${id} AND worker_id = ${workerId} AND status IN ('running','pushing') RETURNING id`;
+    return rows.length > 0;
+  }
+
+  async markPushing(id: string, workerId: string): Promise<boolean> {
+    const rows = await this.sql`UPDATE builder_runs SET status = 'pushing' WHERE id = ${id} AND worker_id = ${workerId} AND status = 'running' RETURNING id`;
     return rows.length > 0;
   }
 
   async recoverExpiredLeases(): Promise<number> {
-    const rows = await this.sql`UPDATE builder_runs SET status = 'queued', worker_id = NULL, lease_expires_at = NULL, started_at = NULL WHERE status = 'running' AND lease_expires_at < now() RETURNING id`;
+    const rows = await this.sql`UPDATE builder_runs SET status = 'queued', worker_id = NULL, lease_expires_at = NULL, started_at = NULL WHERE status IN ('running','pushing') AND lease_expires_at < now() RETURNING id`;
     return rows.length;
   }
 
@@ -66,7 +71,7 @@ export class PostgresRunRepository implements RunRepository {
   }
 
   async requestCancel(id: string): Promise<boolean> {
-    const rows = await this.sql`UPDATE builder_runs SET cancel_requested = true, status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END, finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END WHERE id = ${id} AND status IN ('queued', 'running') RETURNING id`;
+    const rows = await this.sql`UPDATE builder_runs SET cancel_requested = true, status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END, finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END WHERE id = ${id} AND status IN ('queued', 'running', 'pushing') RETURNING id`;
     return rows.length > 0;
   }
 
@@ -101,7 +106,7 @@ function mapRun(row: Row): BuildRun {
   return {
     id: String(row.id), workflow: row.workflow as BuildRun["workflow"], source: row.source as BuildRun["source"],
     inputs: row.inputs as Record<string, string>, secrets: row.secrets as Record<string, string>, metadata: (row.metadata ?? { exposedPorts: [], detectedDockerfiles: {} }) as BuildRun["metadata"], status: row.status as BuildRun["status"],
-    attempt: Number(row.attempt), idempotencyKey: String(row.idempotency_key), leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at as string).toISOString() : null, cancelRequested: Boolean(row.cancel_requested), error: row.error ? String(row.error) : null,
+    attempt: Number(row.attempt), idempotencyKey: String(row.idempotency_key), leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at as string).toISOString() : null, workerId: row.worker_id ? String(row.worker_id) : null, cancelRequested: Boolean(row.cancel_requested), error: row.error ? String(row.error) : null,
     createdAt: new Date(row.created_at as string).toISOString(), startedAt: row.started_at ? new Date(row.started_at as string).toISOString() : null,
     finishedAt: row.finished_at ? new Date(row.finished_at as string).toISOString() : null,
   };

@@ -21,12 +21,15 @@ export class WorkflowExecutor {
     try {
       await log(null, "system", `Checking out ${run.source.repository} at ${run.source.ref}`);
       const cloneUrl = authenticatedUrl(run.source.repository, run.secrets.GIT_TOKEN);
-      const clone = await runProcess(["git", "clone", "--depth", "1", "--branch", run.source.ref, cloneUrl, workspace], { cwd: this.options.workdir, signal, onStdout: (line) => void log(null, "stdout", line), onStderr: (line) => void log(null, "stderr", line) });
+      const clone = await runProcess(["git", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "http.followRedirects=false", "clone", "--depth", "1", "--branch", run.source.ref, cloneUrl, workspace], { cwd: this.options.workdir, signal, onStdout: (line) => void log(null, "stdout", line), onStderr: (line) => void log(null, "stderr", line) });
       if (clone.exitCode !== 0) throw new Error(`Git checkout failed with code ${clone.exitCode}`);
       const revision = await runProcess(["git", "rev-parse", "HEAD"], { cwd: workspace, signal });
       if (revision.exitCode !== 0) throw new Error("Unable to resolve Git commit");
-      const context = { ...Object.fromEntries(Object.entries(run.inputs).map(([key, value]) => [`inputs.${key}`, value])), "git.sha": revision.stdout.trim(), "git.ref": run.source.ref, "run.id": run.id };
-      await this.runGraph(run, workspace, context, { ...run.metadata }, signal, log);
+      const resolvedCommit = revision.stdout.trim();
+      const metadata = { ...run.metadata, resolvedCommit };
+      await this.options.repository.updateMetadata(run.id, metadata);
+      const context = { ...Object.fromEntries(Object.entries(run.inputs).map(([key, value]) => [`inputs.${key}`, value])), "git.sha": resolvedCommit, "git.ref": run.source.ref, "run.id": run.id };
+      await this.runGraph(run, workspace, context, metadata, signal, log);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -67,11 +70,15 @@ export class WorkflowExecutor {
 
   private async runStep(run: BuildRun, step: WorkflowStep, workspace: string, context: Record<string, string>, metadata: BuildRun["metadata"], signal: AbortSignal, log: (stepId: string | null, stream: "system" | "stdout" | "stderr", message: string) => Promise<void>): Promise<void> {
     if ("build" in step) {
-      await executeBuildKit(step, { workspace, address: this.options.buildkitAddress, context, secrets: run.secrets, signal, log: (stream, line) => void log(step.id, stream, line) });
+      if (!run.workerId || !(await this.options.repository.markPushing(run.id, run.workerId))) throw new Error("Build lease was lost before image export");
+      const result = await executeBuildKit(step, { workspace, address: this.options.buildkitAddress, context, secrets: run.secrets, signal, log: (stream, line) => void log(step.id, stream, line) });
       const dockerfilePath = safePath(workspace, step.build.dockerfile);
       const exposedPorts = await inspectDockerfile(dockerfilePath);
       metadata.exposedPorts = [...new Set([...metadata.exposedPorts, ...exposedPorts])];
       metadata.detectedDockerfiles[step.id] = { path: step.build.dockerfile, exposedPorts };
+      if (result.digest) {
+        metadata.artifacts = result.tags.map((image) => ({ image, digest: result.digest! }));
+      }
       await this.options.repository.updateMetadata(run.id, metadata);
       await log(step.id, "system", exposedPorts.length ? `Detected exposed ports: ${exposedPorts.join(", ")}` : "No numeric EXPOSE port detected");
       return;

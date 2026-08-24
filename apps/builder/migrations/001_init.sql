@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS builder_runs (
   secrets jsonb NOT NULL DEFAULT '{}'::jsonb,
   metadata jsonb NOT NULL DEFAULT '{"exposedPorts":[],"detectedDockerfiles":{}}'::jsonb,
   idempotency_key text NOT NULL,
-  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','pushing','succeeded','failed','cancelled')),
   attempt integer NOT NULL DEFAULT 0,
   worker_id text,
   lease_expires_at timestamptz,
@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS builder_runs (
 ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{"exposedPorts":[],"detectedDockerfiles":{}}'::jsonb;
 ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS idempotency_key text;
 ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+ALTER TABLE builder_runs DROP CONSTRAINT IF EXISTS builder_runs_status_check;
+ALTER TABLE builder_runs ADD CONSTRAINT builder_runs_status_check CHECK (status IN ('queued','running','pushing','succeeded','failed','cancelled'));
 UPDATE builder_runs SET idempotency_key = id::text WHERE idempotency_key IS NULL;
 ALTER TABLE builder_runs ALTER COLUMN idempotency_key SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS builder_runs_idempotency_uq ON builder_runs (idempotency_key);

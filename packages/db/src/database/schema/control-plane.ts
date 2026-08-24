@@ -1,6 +1,43 @@
-import { index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
-import { applications } from "./projects.js";
+import { applications, projects } from "./projects.js";
+import { user } from "./auth.js";
+
+/** API-owned immutable build history. Builder runs are execution details only. */
+export const builds = pgTable(
+  "builds",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    triggeredBy: text("triggered_by").references(() => user.id, { onDelete: "set null" }),
+    trigger: text("trigger", { enum: ["build", "deploy", "retry"] }).notNull(),
+    retryOfBuildId: text("retry_of_build_id"),
+    sourceType: text("source_type").notNull().default("git"),
+    repositoryUrl: text("repository_url").notNull(),
+    repositoryProvider: text("repository_provider").notNull().default("generic"),
+    branch: text("branch").notNull(),
+    commitSha: text("commit_sha"),
+    status: text("status", { enum: ["created", "queued", "running", "pushing", "succeeded", "failed", "cancelled"] }).notNull().default("created"),
+    builderJobId: text("builder_job_id").unique(),
+    buildConfiguration: jsonb("build_configuration").notNull(),
+    imageRepository: text("image_repository").notNull(),
+    imageTag: text("image_tag").notNull(),
+    imageDigest: text("image_digest"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    queuedAt: timestamp("queued_at"),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index("builds_application_created_idx").on(table.applicationId, table.createdAt),
+    index("builds_project_status_idx").on(table.projectId, table.status),
+  ],
+);
 
 /** Control-plane representation of a machine. Secrets are stored only as hashes. */
 export const nodes = pgTable(
@@ -76,9 +113,15 @@ export const deployments = pgTable(
     runtime: text("runtime", { enum: ["container", "microvm"] }).notNull(),
     requirements: jsonb("requirements").notNull(),
     runtimeConfig: jsonb("runtime_config").notNull().default({}),
+    buildId: text("build_id").references(() => builds.id, { onDelete: "restrict" }),
+    commitSha: text("commit_sha"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [index("deployments_application_idx").on(table.applicationId, table.createdAt)],
+  (table) => [
+    index("deployments_application_idx").on(table.applicationId, table.createdAt),
+    uniqueIndex("deployments_build_uidx").on(table.buildId),
+  ],
 );
 
 /** Actual state reports belong to agents; control-plane users only set desired state. */

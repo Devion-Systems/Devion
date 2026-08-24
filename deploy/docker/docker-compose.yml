@@ -36,6 +36,59 @@ services:
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     volumes:
       - registry-data:/var/lib/registry
+    ports:
+      - "${REGISTRY_PORT:-5000}:5000"
+    networks: [devion]
+
+  buildkit:
+    image: moby/buildkit:v0.25.2-rootless
+    restart: unless-stopped
+    command: ["--addr", "tcp://0.0.0.0:1234"]
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    volumes:
+      - builder-buildkit:/home/user/.local/share/buildkit
+    networks: [devion]
+
+  builder-api:
+    build:
+      context: ../../apps/builder
+      dockerfile: Dockerfile
+    command: ["bun", "src/api.ts"]
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BUILDER_API_TOKEN: ${BUILDER_API_TOKEN}
+      BUILDKIT_ADDRESS: tcp://buildkit:1234
+      BUILDER_WORKDIR: /workspaces
+      PORT: 3010
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [devion]
+
+  builder-worker:
+    build:
+      context: ../../apps/builder
+      dockerfile: Dockerfile
+    command: ["bun", "src/worker.ts"]
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BUILDER_API_TOKEN: ${BUILDER_API_TOKEN}
+      BUILDKIT_ADDRESS: tcp://buildkit:1234
+      BUILDER_WORKDIR: /workspaces
+      WORKER_CONCURRENCY: ${BUILDER_WORKER_CONCURRENCY:-2}
+    volumes:
+      - builder-workspaces:/workspaces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      buildkit:
+        condition: service_started
     networks: [devion]
 
   migrate:
@@ -87,6 +140,11 @@ services:
       SYSTEM_UPDATE_STATE_FILE: /data/system-updates/latest.json
       DATABASE_PUBLIC_HOST: ${DATABASE_PUBLIC_HOST:-}
       DEVION_LOCAL_AGENT_TOKEN: ${DEVION_LOCAL_AGENT_TOKEN}
+      BUILDER_API_URL: http://builder-api:3010
+      BUILDER_API_TOKEN: ${BUILDER_API_TOKEN}
+      DEVION_BUILDER_IMAGE_PREFIX: registry:5000/devion
+      DEVION_BUILDER_REGISTRY_INSECURE: "true"
+      DEVION_BUILD_IMAGE_PREFIX: ${DEVION_BUILD_IMAGE_PREFIX:-localhost:5000/devion}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../../data/system-updates:/data/system-updates
@@ -200,6 +258,8 @@ services:
 
 volumes:
   agent-data:
+  builder-buildkit:
+  builder-workspaces:
   postgres-data:
   rustfs-data:
   registry-data:

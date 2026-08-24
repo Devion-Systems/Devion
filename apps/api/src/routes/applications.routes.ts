@@ -37,6 +37,10 @@ const applicationFields = z.object({
   imageName: z.string().trim().min(1).max(500).nullable().optional(),
   branch: z.string().trim().min(1).max(255).optional(),
   internalPort: z.number().int().min(1).max(65_535).optional(),
+  repositoryProvider: z.string().trim().min(1).max(64).optional(),
+  rootDirectory: z.string().trim().min(1).max(512).refine((value) => !value.startsWith("/") && !value.split(/[\\/]+/).includes(".."), "Root directory must stay inside the repository").optional(),
+  buildConfiguration: z.object({ dockerfile: z.string().min(1).max(512).optional(), context: z.string().min(1).max(512).optional(), target: z.string().min(1).max(128).optional(), args: z.record(z.string()).optional() }).optional(),
+  autoDeployEnabled: z.boolean().optional(),
 });
 const applicationInput = applicationFields.superRefine((value, context) => {
   if (value.sourceType === "git" && !value.gitUrl) {
@@ -116,6 +120,11 @@ routes.get("/:orgSlug/applications", async (c) => {
       imageName: applications.imageName,
       status: applications.status,
       branch: applications.branch,
+      repositoryProvider: applications.repositoryProvider,
+      rootDirectory: applications.rootDirectory,
+      buildConfiguration: applications.buildConfiguration,
+      autoDeployEnabled: applications.autoDeployEnabled,
+      lastKnownCommit: applications.lastKnownCommit,
       internalPort: applications.internalPort,
       projectId: projects.id,
       projectName: projects.name,
@@ -163,6 +172,10 @@ routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
       imageName: parsed.data.sourceType === "docker" ? (parsed.data.imageName ?? null) : null,
       branch: parsed.data.branch ?? "main",
       internalPort: parsed.data.internalPort ?? 3000,
+      repositoryProvider: parsed.data.repositoryProvider ?? "generic",
+      rootDirectory: parsed.data.rootDirectory ?? ".",
+      buildConfiguration: parsed.data.buildConfiguration ?? {},
+      autoDeployEnabled: parsed.data.autoDeployEnabled ?? false,
     });
   } catch (error) {
     if ((error as { code?: string }).code === "23505")

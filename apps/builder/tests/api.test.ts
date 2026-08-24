@@ -8,13 +8,14 @@ class MemoryRepository implements RunRepository {
   async create(input: CreateRunInput) {
     const existing = [...this.runs.values()].find((run) => run.idempotencyKey === input.idempotencyKey);
     if (existing) return { run: existing, created: false };
-    const run: BuildRun = { id: crypto.randomUUID(), ...input, metadata: { exposedPorts: [], detectedDockerfiles: {} }, status: "queued", attempt: 0, leaseExpiresAt: null, cancelRequested: false, error: null, createdAt: new Date().toISOString(), startedAt: null, finishedAt: null };
+    const run: BuildRun = { id: crypto.randomUUID(), ...input, metadata: { exposedPorts: [], detectedDockerfiles: {} }, status: "queued", attempt: 0, leaseExpiresAt: null, workerId: null, cancelRequested: false, error: null, createdAt: new Date().toISOString(), startedAt: null, finishedAt: null };
     this.runs.set(run.id, run); return { run, created: true };
   }
   async get(id: string) { return this.runs.get(id) ?? null; }
   async list(limit: number) { return [...this.runs.values()].slice(0, limit); }
   async claim() { return null; }
   async heartbeat() { return true; }
+  async markPushing() { return true; }
   async recoverExpiredLeases() { return 0; }
   async health() {}
   async complete() {}

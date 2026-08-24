@@ -30,6 +30,7 @@ const buildStep = commonStep.extend({
     platforms: z.array(z.string().regex(/^linux\/(amd64|arm64)(\/v\d+)?$/)).min(1).max(8),
     tags: z.array(z.string().min(1).max(255)).min(1).max(32),
     push: z.boolean().default(true),
+    insecureRegistry: z.boolean().default(false),
     args: z.record(z.string(), z.string()).default({}),
     secrets: z.record(z.string(), z.string()).default({}),
     cacheFrom: z.array(z.string()).max(8).default([]),
@@ -69,7 +70,7 @@ export const workflowSchema = z.object({
 
 export type Workflow = z.infer<typeof workflowSchema>;
 export type WorkflowStep = Workflow["steps"][number];
-export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "pushing" | "succeeded" | "failed" | "cancelled";
 
 export interface SourceSpec {
   repository: string;
@@ -87,6 +88,7 @@ export interface BuildRun {
   attempt: number;
   idempotencyKey: string;
   leaseExpiresAt: string | null;
+  workerId: string | null;
   cancelRequested: boolean;
   error: string | null;
   createdAt: string;
@@ -97,6 +99,8 @@ export interface BuildRun {
 export interface BuildMetadata {
   exposedPorts: number[];
   detectedDockerfiles: Record<string, { path: string; exposedPorts: number[] }>;
+  resolvedCommit?: string;
+  artifacts?: Array<{ image: string; digest: string }>;
 }
 
 export interface LogEntry {

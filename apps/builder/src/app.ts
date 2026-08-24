@@ -8,7 +8,7 @@ import { validateWorkflow } from "./workflow.ts";
 
 const createRunSchema = z.object({
   workflow: z.unknown(),
-  source: z.object({ repository: z.string().min(1).max(2048), ref: z.string().min(1).max(255).default("main") }),
+  source: z.object({ repository: z.string().url().max(2048).refine((value) => { if (!URL.canParse(value)) return false; const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password; }, "Repository must be a credential-free HTTPS URL"), ref: z.string().min(1).max(255).default("main") }),
   inputs: z.record(z.string(), z.string()).default({}),
   secrets: z.record(z.string(), z.string()).default({}),
 });

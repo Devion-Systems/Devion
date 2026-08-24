@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -99,6 +100,12 @@ export const applications = pgTable(
     containerName: text("container_name").unique(),
     internalPort: integer("internal_port").default(3000).notNull(),
     branch: text("branch").default("main").notNull(),
+    repositoryProvider: text("repository_provider").default("generic").notNull(),
+    rootDirectory: text("root_directory").default(".").notNull(),
+    buildConfiguration: jsonb("build_configuration").$type<Record<string, unknown>>().default({}).notNull(),
+    autoDeployEnabled: boolean("auto_deploy_enabled").default(false).notNull(),
+    gitCredentialReference: text("git_credential_reference"),
+    lastKnownCommit: text("last_known_commit"),
     status: text("status", {
       enum: ["draft", "ready", "deploying", "healthy", "degraded", "failed", "stopped"],
     })

@@ -9,6 +9,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RotateCcw,
   Search,
   Square,
   Trash2,
@@ -39,6 +40,7 @@ type Application = {
   projectName: string;
   updatedAt: string;
 };
+type Build = { id: string; status: string; branch: string; commitSha: string | null; imageDigest: string | null; errorMessage: string | null; trigger: string; createdAt: string; startedAt: string | null; completedAt: string | null };
 
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 const dateTime = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" });
@@ -72,6 +74,8 @@ export default function ApplicationsPage() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editBranch, setEditBranch] = useState("main");
+  const [buildApplication, setBuildApplication] = useState<Application | null>(null);
+  const [logBuild, setLogBuild] = useState<Build | null>(null);
 
   const projects = useQuery<Project[]>({
     queryKey: ["org", orgSlug, "projects"],
@@ -171,6 +175,46 @@ export default function ApplicationsPage() {
       refresh();
     },
   });
+  const builds = useQuery<Build[]>({
+    queryKey: ["org", orgSlug, "application", buildApplication?.id, "builds"],
+    enabled: Boolean(buildApplication),
+    refetchInterval: (query) => query.state.data?.some((item) => ["created", "queued", "running", "pushing"].includes(item.status)) ? 2000 : false,
+    queryFn: async () => {
+      if (!buildApplication) return [];
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${buildApplication.projectId}/applications/${buildApplication.id}/builds`), { credentials: "include" });
+      if (!response.ok) throw new Error("Builds konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const buildAction = useMutation({
+    mutationFn: async ({ application, deploy }: { application: Application; deploy: boolean }) => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${application.projectId}/applications/${application.id}/builds`), { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ deploy }) });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error ?? "Build konnte nicht gestartet werden");
+      return body;
+    },
+    onSuccess: () => { void builds.refetch(); refresh(); },
+  });
+  const buildLifecycle = useMutation({
+    mutationFn: async ({ build, action }: { build: Build; action: "cancel" | "retry" }) => {
+      if (!buildApplication) throw new Error("Anwendung fehlt");
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${buildApplication.projectId}/builds/${build.id}/${action}`), { method: "POST", credentials: "include" });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error ?? "Build-Aktion fehlgeschlagen");
+    },
+    onSuccess: () => void builds.refetch(),
+  });
+  const buildLogs = useQuery<Array<{ id: number; stream: string; message: string }>>({
+    queryKey: ["build", logBuild?.id, "logs"],
+    enabled: Boolean(buildApplication && logBuild),
+    refetchInterval: logBuild && ["queued", "running", "pushing"].includes(logBuild.status) ? 2000 : false,
+    queryFn: async () => {
+      if (!buildApplication || !logBuild) return [];
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${buildApplication.projectId}/builds/${logBuild.id}/logs`), { credentials: "include" });
+      if (!response.ok) throw new Error("Build-Logs konnten nicht geladen werden");
+      return response.json();
+    },
+  });
 
   const visible = useMemo(
     () => (applications.data ?? []).filter((item) => `${item.name} ${item.projectName} ${item.description ?? ""} ${sourceLabel(item)}`.toLowerCase().includes(search.toLowerCase())),
@@ -188,7 +232,7 @@ export default function ApplicationsPage() {
 
   function applicationActions(application: Application) {
     if (application.sourceType !== "docker") {
-      return <span className="text-xs text-zinc-500">Build-Worker erforderlich</span>;
+      return <Button type="button" size="sm" onClick={() => setBuildApplication(application)}><Play className="size-3.5" />Deploy</Button>;
     }
 
     const active = isActive(application);
@@ -273,7 +317,7 @@ export default function ApplicationsPage() {
         </section>
       ) : null}
 
-      <CapabilityNotice title="Docker-Runtime verfügbar" description="Docker-Images können im isolierten Devion-Netzwerk gestartet und gestoppt werden. Git-Anwendungen benötigen weiterhin den Build-Worker." />
+      <CapabilityNotice title="Git- und Docker-Deployments" description="Git-Anwendungen werden reproduzierbar gebaut, als OCI-Artifact gespeichert und danach über dieselbe Agent-Control-Plane ausgerollt." />
 
       {runtimeAction.error || remove.error ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-100">
@@ -378,6 +422,27 @@ export default function ApplicationsPage() {
           </>
         ) : null}
       </section>
+
+      {buildApplication ? (
+        <section className="rounded-2xl border border-[#00cec9]/25 bg-[#172128] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div><h2 className="font-medium text-zinc-100">Git Deployment · {buildApplication.name}</h2><p className="mt-1 text-sm text-zinc-500">{buildApplication.gitUrl} · {buildApplication.branch}</p></div>
+            <Button variant="ghost" size="icon" onClick={() => { setBuildApplication(null); setLogBuild(null); }} aria-label="Build-Ansicht schließen"><X className="size-4" /></Button>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button onClick={() => buildAction.mutate({ application: buildApplication, deploy: true })} disabled={buildAction.isPending}><Play className="size-4" />Build & Deploy</Button>
+            <Button variant="outline" onClick={() => buildAction.mutate({ application: buildApplication, deploy: false })} disabled={buildAction.isPending}>Nur Build</Button>
+          </div>
+          {buildAction.error || buildLifecycle.error ? <p className="mt-4 text-sm text-red-300">{buildAction.error?.message ?? buildLifecycle.error?.message}</p> : null}
+          <div className="mt-6 overflow-x-auto rounded-xl border border-white/[0.07]">
+            <table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-white/[0.06] text-xs uppercase text-zinc-500"><tr><th className="px-4 py-3">Build</th><th className="px-4 py-3">Commit</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Artifact</th><th className="px-4 py-3">Erstellt</th><th className="px-4 py-3 text-right">Aktion</th></tr></thead>
+              <tbody className="divide-y divide-white/[0.06]">{(builds.data ?? []).map((build) => <tr key={build.id}><td className="px-4 py-3 font-mono text-xs text-zinc-300">{build.id.slice(0, 8)}</td><td className="px-4 py-3 font-mono text-xs text-zinc-400" title={build.commitSha ?? undefined}>{build.commitSha?.slice(0, 7) ?? "–"}</td><td className="px-4 py-3"><ResourceStatusBadge status={build.status} /></td><td className="max-w-52 truncate px-4 py-3 font-mono text-xs text-zinc-500" title={build.imageDigest ?? undefined}>{build.imageDigest ? build.imageDigest.slice(0, 19) + "…" : "–"}</td><td className="px-4 py-3 text-xs text-zinc-500">{dateTime.format(new Date(build.createdAt))}</td><td className="px-4 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => setLogBuild(build)}>Logs</Button>{["queued", "running", "pushing"].includes(build.status) ? <Button size="sm" variant="ghost" onClick={() => buildLifecycle.mutate({ build, action: "cancel" })}>Abbrechen</Button> : ["failed", "cancelled"].includes(build.status) ? <Button size="sm" variant="ghost" onClick={() => buildLifecycle.mutate({ build, action: "retry" })}><RotateCcw className="size-3.5" />Retry</Button> : null}</td></tr>)}</tbody>
+            </table>
+            {!builds.isLoading && !builds.data?.length ? <p className="p-6 text-center text-sm text-zinc-500">Noch keine Builds.</p> : null}
+          </div>
+          {logBuild ? <div className="mt-4 rounded-xl border border-white/[0.07] bg-[#080d10] p-4"><div className="mb-3 flex items-center justify-between"><p className="font-mono text-xs text-zinc-400">Build {logBuild.id.slice(0, 8)} · Logs</p><Button size="sm" variant="ghost" onClick={() => setLogBuild(null)}>Schließen</Button></div><pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-zinc-300">{buildLogs.isError ? buildLogs.error.message : (buildLogs.data ?? []).map((entry) => entry.message).join("\n") || "Noch keine Logs."}</pre></div> : null}
+        </section>
+      ) : null}
 
       {editingId ? (
         <section aria-labelledby="edit-application-title" className="rounded-2xl border border-[#0984e3]/25 bg-[#172128] p-5">

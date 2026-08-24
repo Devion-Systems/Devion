@@ -14,6 +14,7 @@ export interface RunRepository {
   list(limit: number): Promise<BuildRun[]>;
   claim(workerId: string, leaseSeconds: number): Promise<BuildRun | null>;
   heartbeat(id: string, workerId: string, leaseSeconds: number): Promise<boolean>;
+  markPushing(id: string, workerId: string): Promise<boolean>;
   recoverExpiredLeases(): Promise<number>;
   health(): Promise<void>;
   complete(id: string, workerId: string): Promise<void>;

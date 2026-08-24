@@ -132,6 +132,10 @@ S3_ACCESS_KEY=devion-storage
 S3_SECRET_KEY=$storage_secret
 S3_ENDPOINT=http://rustfs:9000
 DOCKER_REGISTRY_URL=http://registry:5000
+REGISTRY_PORT=5000
+BUILDER_API_TOKEN=$(secret)
+BUILDER_WORKER_CONCURRENCY=2
+DEVION_BUILD_IMAGE_PREFIX=localhost:5000/devion
 TRAEFIK_ENABLED=true
 TRAEFIK_DYNAMIC_CONFIG_DIR=/data/traefik/dynamic
 TRAEFIK_CERTS_DIR=/data/traefik/certs
@@ -174,6 +178,10 @@ ensure_env_value "BETTER_AUTH_COOKIE_DOMAIN" ""
 ensure_env_value "TRAEFIK_CNAME_TARGET" ""
 ensure_env_value "DEVION_LOCAL_AGENT_TOKEN" "$(secret)"
 ensure_env_value "DEVION_SETUP_TOKEN" "$(secret)"
+ensure_env_value "BUILDER_API_TOKEN" "$(secret)"
+ensure_env_value "REGISTRY_PORT" "5000"
+ensure_env_value "BUILDER_WORKER_CONCURRENCY" "2"
+ensure_env_value "DEVION_BUILD_IMAGE_PREFIX" "localhost:5000/devion"
 
 info "Bereite Traefik-Verzeichnisse vor"
 install -d -m 700 "$INSTALL_DIR/data/traefik/dynamic" "$INSTALL_DIR/data/traefik/certs" "$INSTALL_DIR/data/traefik/acme"
