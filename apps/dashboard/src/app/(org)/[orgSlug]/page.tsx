@@ -111,14 +111,25 @@ export default function OrgOverviewPage() {
   ];
 
   return (
-    <main className="flex flex-col gap-6 p-5 sm:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1"><PageHeader title="Übersicht" description="Was gerade läuft und was deine Aufmerksamkeit braucht." /></div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild size="lg" variant="outline"><Link href={`/${orgSlug}/databases/new`}><Database data-icon="inline-start" />Datenbank</Link></Button>
-          <Button asChild size="lg"><Link href={`/${orgSlug}/projects/new`}><Plus data-icon="inline-start" />Projekt erstellen</Link></Button>
-        </div>
-      </div>
+    <main className="flex flex-col gap-6 py-6">
+      <PageHeader
+        title="Overview"
+        description="Current system state and what needs your attention."
+        primaryAction={
+          <Button asChild size="lg">
+            <Link href={`/${orgSlug}/projects/new`}>
+              <Plus data-icon="inline-start" />New Project
+            </Link>
+          </Button>
+        }
+        secondaryActions={
+          <Button asChild size="lg" variant="outline">
+            <Link href={`/${orgSlug}/databases/new`}>
+              <Database data-icon="inline-start" />New Database
+            </Link>
+          </Button>
+        }
+      />
 
       {isError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100"><span>Die Übersicht konnte nicht geladen werden. Prüfe die Verbindung und versuche es erneut.</span><Button size="sm" variant="outline" onClick={() => void refetch()}><RefreshCw data-icon="inline-start" />Erneut laden</Button></div> : null}
 

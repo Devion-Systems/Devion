@@ -49,11 +49,18 @@ export default function ProjectsPage() {
   );
 
   return (
-    <main className="flex flex-col gap-6 p-5 sm:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1"><PageHeader title="Projekte" description="Anwendungen, Deployments und ihre aktuelle Arbeitsversion." /></div>
-        <Button asChild size="lg"><Link href={`/${orgSlug}/projects/new`}><Plus data-icon="inline-start" />Projekt erstellen</Link></Button>
-      </div>
+    <main className="flex flex-col gap-6 py-6">
+      <PageHeader
+        title="Projects"
+        description="Manage applications and infrastructure grouped by project."
+        primaryAction={
+          <Button asChild size="lg">
+            <Link href={`/${orgSlug}/projects/new`}>
+              <Plus data-icon="inline-start" />New Project
+            </Link>
+          </Button>
+        }
+      />
 
       {isError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100"><span>Projekte konnten nicht geladen werden. Prüfe die Verbindung und versuche es erneut.</span><Button size="sm" variant="outline" onClick={() => void refetch()}>Erneut laden</Button></div> : null}
 
