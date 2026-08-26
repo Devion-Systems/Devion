@@ -9,7 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/features/auth/hooks/hooks";
@@ -26,7 +26,17 @@ export default function AccountSecurityPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddingPasskey, setIsAddingPasskey] = useState(false);
   const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
+  const [passkeys, setPasskeys] = useState<
+    Array<{ id: string; name?: string | null; createdAt?: Date | string }>
+  >([]);
   const enabled = Boolean(session?.user.twoFactorEnabled);
+  async function loadPasskeys() {
+    const { data } = await authClient.passkey.listUserPasskeys();
+    setPasskeys(data ?? []);
+  }
+  useEffect(() => {
+    void loadPasskeys();
+  }, []);
 
   async function startSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,8 +46,9 @@ export default function AccountSecurityPage() {
       const { data, error } = await authClient.twoFactor.enable({
         password: setupPassword,
         issuer: "Devion",
+        method: "totp",
       });
-      if (error || !data) {
+      if (error || !data || data.method !== "totp") {
         setMessage(
           error?.message ??
             "Die Zwei-Faktor-Authentifizierung konnte nicht vorbereitet werden.",
@@ -133,11 +144,19 @@ export default function AccountSecurityPage() {
           ? (error.message ?? "Der Passkey konnte nicht hinzugefügt werden.")
           : "Passkey hinzugefügt. Du kannst dich künftig mit diesem Gerät anmelden.",
       );
+      await loadPasskeys();
     } catch {
-      setPasskeyMessage("Passkeys werden von diesem Browser oder Gerät nicht unterstützt.");
+      setPasskeyMessage(
+        "Passkeys werden von diesem Browser oder Gerät nicht unterstützt.",
+      );
     } finally {
       setIsAddingPasskey(false);
     }
+  }
+  async function removePasskey(id: string) {
+    const { error } = await authClient.passkey.deletePasskey({ id });
+    setPasskeyMessage(error?.message ?? "Passkey wurde entfernt.");
+    await loadPasskeys();
   }
 
   return (
@@ -277,14 +296,53 @@ export default function AccountSecurityPage() {
           </span>
           <div>
             <h2 className="font-semibold text-zinc-100">Passkey</h2>
-            <p className="text-sm text-zinc-500">Melde dich mit Face ID, Touch ID, Windows Hello oder einem Sicherheitsschlüssel an.</p>
+            <p className="text-sm text-zinc-500">
+              Melde dich mit Face ID, Touch ID, Windows Hello oder einem
+              Sicherheitsschlüssel an.
+            </p>
           </div>
         </div>
-        <p className="text-sm text-zinc-400">Der Passkey ist an dieses Gerät oder deinen Passwortmanager gebunden. Zur Registrierung ist eine lokale Gerätebestätigung erforderlich.</p>
-        <Button type="button" className="mt-5" disabled={isAddingPasskey} onClick={() => void addPasskey()}>
-          <Fingerprint /> {isAddingPasskey ? "Passkey wird hinzugefügt …" : "Passkey hinzufügen"}
+        <p className="text-sm text-zinc-400">
+          Der Passkey ist an dieses Gerät oder deinen Passwortmanager gebunden.
+          Zur Registrierung ist eine lokale Gerätebestätigung erforderlich.
+        </p>
+        <Button
+          type="button"
+          className="mt-5"
+          disabled={isAddingPasskey}
+          onClick={() => void addPasskey()}
+        >
+          <Fingerprint />{" "}
+          {isAddingPasskey
+            ? "Passkey wird hinzugefügt …"
+            : "Passkey hinzufügen"}
         </Button>
-        {passkeyMessage ? <p className="mt-4 flex items-center gap-2 text-sm text-[#81ecec]"><CheckCircle2 className="size-4" />{passkeyMessage}</p> : null}
+        {passkeyMessage ? (
+          <p className="mt-4 flex items-center gap-2 text-sm text-[#81ecec]">
+            <CheckCircle2 className="size-4" />
+            {passkeyMessage}
+          </p>
+        ) : null}
+        {passkeys.length > 0 ? (
+          <div className="mt-5 space-y-2">
+            {passkeys.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between rounded-xl border border-white/[0.08] p-3 text-sm"
+              >
+                <span>{item.name || "Passkey"}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void removePasskey(item.id)}
+                >
+                  Entfernen
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       {backupCodes.length > 0 ? (

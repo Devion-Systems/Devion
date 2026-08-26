@@ -17,6 +17,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
+import {
+  hasOrganizationPermission,
+  resolveOrganizationAccess,
+} from "../middleware/organization-policy.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
@@ -85,19 +89,10 @@ function createSecret() {
 function secretMatches(candidate: string, expected: string) {
   return timingSafeEqual(Buffer.from(tokenHash(candidate)), Buffer.from(tokenHash(expected)));
 }
-function manager(role: string) {
-  return role === "owner" || role === "admin";
-}
+const manager = (role: string) => hasOrganizationPermission(role, "manage");
 
 async function organizationAccess(request: Request, slug: string) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  const org = await db.query.organization.findFirst({ where: eq(organization.slug, slug) });
-  if (!org) return null;
-  const membership = await db.query.member.findFirst({
-    where: and(eq(member.organizationId, org.id), eq(member.userId, session.user.id)),
-  });
-  return membership ? { org, membership, userId: session.user.id } : null;
+  return resolveOrganizationAccess(request, slug);
 }
 
 async function agentIdentity(request: Request) {
@@ -170,7 +165,10 @@ routes.get("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
   const node = await db.query.nodes.findFirst({
-    where: and(eq(nodes.id, c.req.param("nodeId")), or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId))),
+    where: and(
+      eq(nodes.id, c.req.param("nodeId")),
+      or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId)),
+    ),
   });
   if (!node) return c.json({ error: "Node not found" }, 404);
   const assignments = await db
@@ -200,13 +198,19 @@ routes.get("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
 routes.patch("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
-  if (!manager(access.membership.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!manager(access.membership.role))
+    return c.json({ error: "Owner or admin role required" }, 403);
   const parsed = nodeSettingsInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid node settings" }, 400);
   const updated = await db
     .update(nodes)
     .set({ schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0, updatedAt: new Date() })
-    .where(and(eq(nodes.id, c.req.param("nodeId")), or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId))))
+    .where(
+      and(
+        eq(nodes.id, c.req.param("nodeId")),
+        or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId)),
+      ),
+    )
     .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled });
   if (!updated[0]) return c.json({ error: "Node not found" }, 404);
   return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1 });
@@ -264,7 +268,10 @@ routes.post("/api/agents/register", async (c) => {
 routes.post("/api/agents/local/register", async (c) => {
   const parsed = localRegisterInput.safeParse(await c.req.json());
   if (!parsed.success)
-    return c.json({ error: "Invalid local agent registration", issues: parsed.error.flatten() }, 400);
+    return c.json(
+      { error: "Invalid local agent registration", issues: parsed.error.flatten() },
+      400,
+    );
   const localToken = process.env.DEVION_LOCAL_AGENT_TOKEN;
   if (!localToken || !secretMatches(parsed.data.localToken, localToken))
     return c.json({ error: "Local agent authentication required" }, 401);

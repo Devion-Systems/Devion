@@ -15,6 +15,10 @@ import { z } from "zod";
 import { auth } from "../features/auth/config.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import {
+  hasOrganizationPermission,
+  resolveOrganizationAccess,
+} from "../middleware/organization-policy.js";
+import {
   reconcileDeployment,
   stopApplicationWorkloads,
 } from "../modules/deployments/controller.js";
@@ -38,8 +42,24 @@ const applicationFields = z.object({
   branch: z.string().trim().min(1).max(255).optional(),
   internalPort: z.number().int().min(1).max(65_535).optional(),
   repositoryProvider: z.string().trim().min(1).max(64).optional(),
-  rootDirectory: z.string().trim().min(1).max(512).refine((value) => !value.startsWith("/") && !value.split(/[\\/]+/).includes(".."), "Root directory must stay inside the repository").optional(),
-  buildConfiguration: z.object({ dockerfile: z.string().min(1).max(512).optional(), context: z.string().min(1).max(512).optional(), target: z.string().min(1).max(128).optional(), args: z.record(z.string()).optional() }).optional(),
+  rootDirectory: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .refine(
+      (value) => !value.startsWith("/") && !value.split(/[\\/]+/).includes(".."),
+      "Root directory must stay inside the repository",
+    )
+    .optional(),
+  buildConfiguration: z
+    .object({
+      dockerfile: z.string().min(1).max(512).optional(),
+      context: z.string().min(1).max(512).optional(),
+      target: z.string().min(1).max(128).optional(),
+      args: z.record(z.string()).optional(),
+    })
+    .optional(),
   autoDeployEnabled: z.boolean().optional(),
 });
 const applicationInput = applicationFields.superRefine((value, context) => {
@@ -69,19 +89,10 @@ const deploymentRequest = z.object({
 });
 
 async function getScope(request: Request, orgSlug: string) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  const org = await db.query.organization.findFirst({ where: eq(organization.slug, orgSlug) });
-  if (!org) return null;
-  const membership = await db.query.member.findFirst({
-    where: and(eq(member.organizationId, org.id), eq(member.userId, session.user.id)),
-  });
-  return membership ? { org, membership, userId: session.user.id } : null;
+  return resolveOrganizationAccess(request, orgSlug);
 }
 
-function canManage(role: string) {
-  return role === "owner" || role === "admin";
-}
+const canManage = (role: string) => hasOrganizationPermission(role, "manage");
 
 async function getProjectScope(request: Request, orgSlug: string, projectId: string) {
   const scope = await getScope(request, orgSlug);

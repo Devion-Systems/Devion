@@ -123,6 +123,55 @@ export const passkey = pgTable(
   ],
 );
 
+/** Pending OAuth 2.0 Device Authorization requests for the Devion CLI. */
+export const deviceCode = pgTable(
+  "device_code",
+  {
+    id: text("id").primaryKey(),
+    deviceCode: text("device_code").notNull().unique(),
+    userCode: text("user_code").notNull().unique(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    clientId: text("client_id"),
+    scope: text("scope"),
+    status: text("status").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    lastPolledAt: timestamp("last_polled_at"),
+    pollingInterval: integer("polling_interval"),
+  },
+  (table) => [index("deviceCode_userId_idx").on(table.userId)],
+);
+export const apikey = pgTable(
+  "apikey",
+  {
+    id: text("id").primaryKey(),
+    configId: text("config_id").notNull().default("default"),
+    name: text("name"),
+    start: text("start"),
+    referenceId: text("reference_id").notNull(),
+    prefix: text("prefix"),
+    key: text("key").notNull(),
+    refillInterval: integer("refill_interval"),
+    refillAmount: integer("refill_amount"),
+    lastRefillAt: timestamp("last_refill_at"),
+    enabled: boolean("enabled").default(true),
+    rateLimitEnabled: boolean("rate_limit_enabled").default(true),
+    rateLimitTimeWindow: integer("rate_limit_time_window"),
+    rateLimitMax: integer("rate_limit_max"),
+    requestCount: integer("request_count"),
+    remaining: integer("remaining"),
+    lastRequest: timestamp("last_request"),
+    expiresAt: timestamp("expires_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    permissions: text("permissions"),
+    metadata: text("metadata"),
+  },
+  (table) => [
+    index("apikey_key_idx").on(table.key),
+    index("apikey_reference_idx").on(table.referenceId),
+  ],
+);
+
 export const organization = pgTable("organization", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -211,6 +260,7 @@ export const userRelations = relations(user, ({ many }) => ({
   accounts: many(account),
   twoFactors: many(twoFactor),
   passkeys: many(passkey),
+  deviceCodes: many(deviceCode),
   teamMembers: many(teamMember),
   members: many(member),
   invitations: many(invitation),
@@ -240,6 +290,13 @@ export const twoFactorRelations = relations(twoFactor, ({ one }) => ({
 export const passkeyRelations = relations(passkey, ({ one }) => ({
   user: one(user, {
     fields: [passkey.userId],
+    references: [user.id],
+  }),
+}));
+
+export const deviceCodeRelations = relations(deviceCode, ({ one }) => ({
+  user: one(user, {
+    fields: [deviceCode.userId],
     references: [user.id],
   }),
 }));

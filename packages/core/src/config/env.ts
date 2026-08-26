@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { AppError, ErrorCode } from "../error/app-errors.js";
 
+const optionalNonEmpty = z
+  .string()
+  .trim()
+  .transform((value) => value || undefined)
+  .optional();
+
 const coreEnvSchema = z.object({
   API_PORT: z.coerce.number().default(3000),
   BUILDER_PORT: z.coerce.number().default(3001),
@@ -15,6 +21,33 @@ const coreEnvSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET muss mindestens 32 Zeichen lang sein"),
   BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL muss eine gültige URL sein"),
   DASHBOARD_URL: z.string().url().optional(),
+  // Compose supplies empty values for optional SSO settings. Normalize these
+  // to undefined so an unconfigured Generic OAuth provider cannot block boot.
+  OIDC_ISSUER: optionalNonEmpty.pipe(z.string().url().optional()),
+  OIDC_CLIENT_ID: optionalNonEmpty.pipe(z.string().min(1).optional()),
+  OIDC_CLIENT_SECRET: optionalNonEmpty.pipe(z.string().min(1).optional()),
+  OIDC_PROVIDER_ID: optionalNonEmpty
+    .pipe(
+      z
+        .string()
+        .regex(/^[a-z0-9-]+$/)
+        .max(64)
+        .optional(),
+    )
+    .default("oidc"),
+  OIDC_PROVIDER_NAME: optionalNonEmpty.pipe(z.string().max(100).optional()).default("Company SSO"),
+  OIDC_ALLOWED_EMAIL_DOMAINS: optionalNonEmpty,
+  OIDC_ALLOW_SIGN_UP: z
+    .string()
+    .transform((value) => value === "true")
+    .default(false),
+  OIDC_PROMPT: optionalNonEmpty.pipe(z.enum(["login", "consent", "select_account"]).optional()),
+  // Enabled by default: only a SHA-1 hash prefix is sent to the Pwned
+  // Passwords range API, never a plaintext password.
+  HIBP_ENABLED: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(true),
   BETTER_AUTH_TRUSTED_ORIGINS: z.string().optional(),
   // Compose supplies an empty value when no shared cookie domain is needed
   // (the host-IP first-install case). Normalize it instead of rejecting boot.

@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
+import { type Locale, useI18n } from "@/lib/i18n";
 
 type UserMenuProps = {
   /** First letter(s) shown in the avatar. */
@@ -23,6 +24,7 @@ type UserMenuProps = {
 
 export function UserMenu({ initials = "?", name, email }: UserMenuProps) {
   const [signingOut, setSigningOut] = useState(false);
+  const { locale, setLocale, t } = useI18n();
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -63,17 +65,36 @@ export function UserMenu({ initials = "?", name, email }: UserMenuProps) {
           </>
         )}
 
+        <div className="px-2 py-1.5">
+          <label
+            className="block text-xs text-zinc-500"
+            htmlFor="locale-switcher"
+          >
+            {t("common.language")}
+          </label>
+          <select
+            id="locale-switcher"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+            className="mt-1 w-full rounded-md border border-white/[0.1] bg-zinc-900 px-2 py-1 text-xs text-zinc-200"
+          >
+            <option value="de">{t("common.german")}</option>
+            <option value="en">{t("common.english")}</option>
+          </select>
+        </div>
+        <DropdownMenuSeparator />
+
         <DropdownMenuItem asChild>
           <Link href="/account">
             <User className="size-4" aria-hidden="true" />
-            Account-Einstellungen
+            {t("userMenu.settings")}
           </Link>
         </DropdownMenuItem>
 
         <DropdownMenuItem asChild>
           <Link href="/account/security">
             <Settings className="size-4" aria-hidden="true" />
-            Sicherheit
+            {t("userMenu.security")}
           </Link>
         </DropdownMenuItem>
 
@@ -85,7 +106,7 @@ export function UserMenu({ initials = "?", name, email }: UserMenuProps) {
           className="text-red-400 focus:text-red-300"
         >
           <LogOut className="size-4" aria-hidden="true" />
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? t("userMenu.signingOut") : t("userMenu.signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

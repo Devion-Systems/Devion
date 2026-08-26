@@ -117,7 +117,8 @@ export default function ForgotPasswordPage() {
       });
       if (resetError) {
         setError(
-          "Das Passwort konnte nicht geändert werden. Fordere bei Bedarf einen neuen Code an.",
+          resetError.message ??
+            "Das Passwort konnte nicht geändert werden. Fordere bei Bedarf einen neuen Code an.",
         );
         return;
       }

@@ -1,5 +1,7 @@
 import {
   account,
+  apikey,
+  deviceCode,
   invitation,
   member,
   organization,
@@ -8,7 +10,6 @@ import {
   team,
   teamMember,
   twoFactor,
-  passkey,
   user,
   verification,
 } from "./auth.js";
@@ -25,6 +26,9 @@ export const authSchema = {
   account,
   verification,
   twoFactor,
+  passkey,
+  apikey,
+  deviceCode,
   organization,
   member,
   invitation,

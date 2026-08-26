@@ -1,9 +1,21 @@
-import { createLogger, notFoundHandler, parseEnv, registerProcessGuards } from "@repo/core";
+import {
+  createDevionRateLimiters,
+  createLogger,
+  createStoreFromEnv,
+  notFoundHandler,
+  parseEnv,
+  registerProcessGuards,
+  resolveOrgContext,
+} from "@repo/core";
+import { auth } from "./features/auth/config.js";
 import { checkDbHealth, closeDbPool } from "@repo/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { syncFeaturesToDatabase } from "./features/feature/sync_features.js";
-import { startDeploymentController, stopDeploymentController } from "./modules/deployments/controller.js";
+import {
+  startDeploymentController,
+  stopDeploymentController,
+} from "./modules/deployments/controller.js";
 import { startBuildController, stopBuildController } from "./modules/builds/controller.js";
 import {
   corsMiddleware,
@@ -20,6 +32,7 @@ const env = parseEnv();
 const logger = createLogger(env, { name: "api" });
 
 const app = new Hono<AppEnv>();
+const rateLimits = createDevionRateLimiters(createStoreFromEnv());
 
 // --- Global middleware (order matters) ---
 app.use("*", corsMiddleware());
@@ -27,6 +40,12 @@ app.use("*", bodyLimit({ maxSize: 10 * 1024 * 1024 }));
 app.use("*", requestIdMiddleware());
 app.use("*", requestLoggerMiddleware());
 app.use("*", securityHeadersMiddleware());
+app.use("*", rateLimits.global);
+app.use("/api/auth/*", rateLimits.auth);
+app.use("/api/auth/sign-in/email", rateLimits.login);
+app.use("/organizations/*", resolveOrgContext(auth));
+app.use("/organizations/*", rateLimits.perOrgApi);
+app.use("/organizations/*", rateLimits.perApiKey);
 
 // --- Global error handling ---
 app.onError(globalErrorHandler);

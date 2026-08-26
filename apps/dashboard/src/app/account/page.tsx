@@ -12,8 +12,10 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/features/auth/hooks/hooks";
 import { authClient } from "@/lib/auth-client";
+import { useI18n } from "@/lib/i18n";
 
 export default function AccountPage() {
+  const { t } = useI18n();
   const { data: session, isLoading } = useSession();
   const [fullName, setFullName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -99,8 +101,8 @@ export default function AccountPage() {
   return (
     <div className="space-y-6 py-1">
       <PageHeader
-        title="Account-Einstellungen"
-        description="Verwalte deine persönlichen Daten und den Zugang zu deinem Konto."
+        title={t("account.title")}
+        description={t("account.description")}
       />
 
       <section className="max-w-2xl rounded-2xl border border-white/[0.07] bg-[#172128]/90 p-6">
@@ -121,7 +123,7 @@ export default function AccountPage() {
             className="block space-y-1.5 text-sm font-medium text-zinc-300"
             htmlFor="full-name"
           >
-            Vollständiger Name
+            {t("account.fullName")}
             <input
               id="full-name"
               type="text"
@@ -136,7 +138,7 @@ export default function AccountPage() {
           </label>
           <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3">
             <p className="flex items-center gap-2 text-xs font-medium text-zinc-500">
-              <Mail className="size-3.5" /> E-Mail-Adresse
+              <Mail className="size-3.5" /> {t("account.email")}
             </p>
             <p className="mt-1 text-sm text-zinc-200">
               {session?.user.email ?? "Wird geladen …"}

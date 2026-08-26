@@ -32,6 +32,10 @@ Dashboard / API clients
 The API never directly starts application or game-server containers. The agent authenticates to the API, reports resources, polls commands, and is the only component that accesses the node's Docker socket.
 
 Read the full design and node enrollment guide in [docs/control-plane.md](docs/control-plane.md).
+For interactive CLI authentication, see [docs/cli-device-authorization.md](docs/cli-device-authorization.md).
+Enterprise SSO configuration is documented in [docs/generic-oauth-oidc.md](docs/generic-oauth-oidc.md).
+Password compromise protection is documented in [docs/password-security.md](docs/password-security.md).
+Browser account switching is documented in [docs/multi-session.md](docs/multi-session.md).
 
 ## Quick start: production installation
 

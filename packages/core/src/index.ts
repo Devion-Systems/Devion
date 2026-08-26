@@ -1,4 +1,9 @@
 export { parseEnv, type CoreEnv } from "./config/env.js";
+export {
+  createDevionRateLimiters,
+  createStoreFromEnv,
+  resolveOrgContext,
+} from "./firewall/rate-limit.js";
 export type { Brand, RequestId } from "./types/index.js";
 export { scheduleWorkload } from "./control-plane/scheduler.js";
 export {
