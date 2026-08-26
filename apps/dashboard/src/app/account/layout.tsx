@@ -1,11 +1,18 @@
 "use client";
 
-import { KeyRound, Laptop, LockKeyhole, UserRound } from "lucide-react";
+import {
+  KeyRound,
+  Laptop,
+  LockKeyhole,
+  Settings,
+  UserRound,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const accountNavigation = [
+  { href: "/account", label: "Einstellungen", icon: Settings },
   { href: "/account/profile", label: "Profil", icon: UserRound },
   { href: "/account/security", label: "Sicherheit", icon: LockKeyhole },
   { href: "/account/sessions", label: "Sitzungen", icon: Laptop },

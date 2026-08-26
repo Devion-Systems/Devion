@@ -31,7 +31,7 @@ const coreEnvSchema = z.object({
     .transform((value) => value || undefined)
     .pipe(z.string().min(16).max(256).optional())
     .optional(),
-  // SMTP / Email-Service (optional – wird per Feature-Flag gesteuert)
+  // SMTP / Email-Service (optional – Versand erfolgt bei SMTP-Konfiguration standardmäßig)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional(),

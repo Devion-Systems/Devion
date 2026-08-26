@@ -91,7 +91,7 @@ export function Sidebar({ variant }: SidebarProps) {
       )}
       <div className="border-t border-white/[0.07] p-2">
         <Link
-          href="/account/profile"
+          href="/account"
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
         >
           <Settings className="h-4 w-4 shrink-0" />
@@ -185,7 +185,8 @@ function NavLink({
 }) {
   // `/admin/system` is a landing page, not a parent navigation entry. Keep
   // it inactive for deeper system routes such as `/admin/system/updates`.
-  const isActive = pathname === item.href ||
+  const isActive =
+    pathname === item.href ||
     (pathname.startsWith(`${item.href}/`) && item.href !== "/admin/system");
   const Icon = item.icon;
 

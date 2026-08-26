@@ -3,13 +3,16 @@ import { authSchema, db } from "@repo/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
-import { admin, organization, twoFactor } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
+import { admin, emailOTP, organization, twoFactor } from "better-auth/plugins";
 import { sendEmail } from "../email/index.js";
 
 const env = parseEnv();
 const emailVerificationEnabled = Boolean(env.SMTP_HOST && env.SMTP_FROM);
 const cookieDomain = env.BETTER_AUTH_COOKIE_DOMAIN?.trim();
 const useSecureCookies = new URL(env.BETTER_AUTH_URL).protocol === "https:";
+const passkeyOrigin = env.DASHBOARD_URL ?? env.BETTER_AUTH_URL;
+const passkeyRpId = new URL(passkeyOrigin).hostname;
 const trustedOrigins = [
   env.BETTER_AUTH_URL,
   ...(env.BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
@@ -27,8 +30,8 @@ async function sendRequiredAuthEmail(options: { to: string; subject: string; tex
 }
 
 /**
- * Central Better Auth server instance. It intentionally consumes only API-local
- * features (email and feature flags) and the standalone @repo/db package.
+ * Central Better Auth server instance. It intentionally consumes only the
+ * API-local email service and the standalone @repo/db package.
  */
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
@@ -66,13 +69,6 @@ export const auth = betterAuth({
     revokeSessionsOnPasswordReset: true,
     requireEmailVerification: emailVerificationEnabled,
     autoSignInAfterVerification: true,
-    sendResetPassword: async ({ user, url }) => {
-      await sendRequiredAuthEmail({
-        to: user.email,
-        subject: "Reset your password",
-        text: `Reset your password by opening this link: ${url}`,
-      });
-    },
     onExistingUserSignUp: async ({ user }) => {
       await sendRequiredAuthEmail({
         to: user.email,
@@ -99,7 +95,37 @@ export const auth = betterAuth({
   },
   session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
   plugins: [
-    twoFactor(),
+    passkey({
+      rpID: passkeyRpId,
+      rpName: "Devion",
+      origin: passkeyOrigin,
+      authenticatorSelection: {
+        residentKey: "required",
+        userVerification: "required",
+      },
+    }),
+    emailOTP({
+      otpLength: 8,
+      expiresIn: 10 * 60,
+      allowedAttempts: 3,
+      storeOTP: "hashed",
+      disableSignUp: true,
+      rateLimit: { window: 60, max: 3 },
+      async sendVerificationOTP({ email, otp, type }) {
+        if (type !== "forget-password") return;
+
+        await sendRequiredAuthEmail({
+          to: email,
+          subject: "Dein Devion-Code zum Zurücksetzen des Passworts",
+          text: `Dein Sicherheitscode lautet: ${otp}\n\nDer Code ist 10 Minuten gültig und kann höchstens dreimal geprüft werden. Wenn du diese Anfrage nicht gestellt hast, kannst du diese E-Mail ignorieren.`,
+        });
+      },
+    }),
+    twoFactor({
+      issuer: "Devion",
+      totpOptions: { digits: 6, period: 30 },
+      backupCodeOptions: { amount: 10, length: 10 },
+    }),
     admin(),
     organization({
       creatorRole: "owner",

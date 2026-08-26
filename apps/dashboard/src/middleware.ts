@@ -14,6 +14,7 @@ const PUBLIC_PATHS = [
   "/setup",
   "/forgot-password",
   "/reset-password",
+  "/two-factor",
   "/verify-email",
   "/accept-invite",
 ];

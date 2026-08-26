@@ -120,6 +120,13 @@
       "when": 1787616000000,
       "tag": "0016_git_deployment_pipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787702400000,
+      "tag": "0017_passkeys",
+      "breakpoints": true
     }
   ]
 }

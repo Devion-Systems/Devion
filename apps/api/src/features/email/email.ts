@@ -1,6 +1,5 @@
 import { parseEnv } from "@repo/core";
 import nodemailer, { type Transporter } from "nodemailer";
-import { isFeatureEnabled } from "../feature/index.js";
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -44,22 +43,12 @@ function getTransporter(): Transporter | null {
  * Sendet eine E-Mail über den konfigurierten SMTP-Server.
  *
  * Gibt false zurück wenn:
- * - das Feature "email-service" deaktiviert ist
  * - kein SMTP_HOST konfiguriert ist
  *
  * @throws Bei einem SMTP-Übertragungsfehler
  */
 export async function sendEmail(options: SendEmailOptions): Promise<EmailResult> {
-  // 1. Feature-Flag prüfen
-  const featureActive = await isFeatureEnabled("email-service");
-  if (!featureActive) {
-    return {
-      success: false,
-      error: "Email-Service ist deaktiviert (Feature-Flag: email-service = false)",
-    };
-  }
-
-  // 2. SMTP-Transporter abrufen
+  // 1. SMTP-Transporter abrufen
   const transporter = getTransporter();
   if (!transporter) {
     return {
@@ -68,7 +57,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<EmailResult>
     };
   }
 
-  // 3. Absender-Adresse ermitteln
+  // 2. Absender-Adresse ermitteln
   const env = parseEnv();
   const from = env.SMTP_FROM ?? env.SMTP_USER ?? "noreply@devion.app";
 

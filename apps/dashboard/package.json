@@ -10,15 +10,17 @@
     "format": "biome format --write"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.7.1",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-table": "^8.21.3",
     "@xterm/xterm": "^6.0.0",
-    "better-auth": "^1.6.23",
+    "better-auth": "1.7.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "hono": "^4.12.30",
     "lucide-react": "^1.24.0",
     "next": "16.2.7",
+    "qrcode.react": "^4.2.0",
     "radix-ui": "^1.6.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",

@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  LogOut,
-  Settings,
-  User,
-} from "lucide-react";
+import { LogOut, Settings, User } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import {
@@ -68,16 +64,16 @@ export function UserMenu({ initials = "?", name, email }: UserMenuProps) {
         )}
 
         <DropdownMenuItem asChild>
-          <Link href="/account/profile">
+          <Link href="/account">
             <User className="size-4" aria-hidden="true" />
-            Profile
+            Account-Einstellungen
           </Link>
         </DropdownMenuItem>
 
         <DropdownMenuItem asChild>
           <Link href="/account/security">
             <Settings className="size-4" aria-hidden="true" />
-            Account Settings
+            Sicherheit
           </Link>
         </DropdownMenuItem>
 

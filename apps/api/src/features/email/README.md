@@ -14,7 +14,7 @@ Add the dependency to your package's `package.json`:
 
 ## Configuration
 
-The email service leverages the common configuration from `@repo/core` and features from `@repo/feature`.
+The email service leverages the common configuration from `@repo/core`.
 
 It relies on the following environment variables:
 - `SMTP_HOST`: The SMTP server host address (required for sending).
@@ -24,8 +24,8 @@ It relies on the following environment variables:
 - `SMTP_PASS`: Authentication password.
 - `SMTP_FROM`: Custom sender email address (defaults to `SMTP_USER` or `noreply@devion.app`).
 
-And requires the following Feature Flag to be active:
-- `email-service`: Must be enabled for emails to be sent. If disabled, sending is skipped gracefully.
+Email delivery is enabled by default:
+- With `SMTP_HOST` configured, emails are sent by default.
 
 ## Usage
 

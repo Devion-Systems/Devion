@@ -20,7 +20,6 @@ export type FeatureConfig = z.infer<typeof FeatureSchema>;
 
 // Deine Rohdaten
 const rawFeatures = [
-  { name: "email-service", description: "Sending Emails", isActive: false },
   {
     name: "ai-gateway",
     description: "Multi-provider AI text generation and streaming",
