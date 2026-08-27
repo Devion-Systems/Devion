@@ -1,5 +1,6 @@
 import { parseEnv } from "@repo/core";
-import { authSchema, db } from "@repo/db";
+import { auditLogs, authSchema, db, member } from "@repo/db";
+import { and, eq } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
@@ -212,17 +213,60 @@ export const auth: any = betterAuth({
     organization({
       creatorRole: "owner",
       allowUserToCreateOrganization: async (candidate) =>
-        (candidate as { role?: string }).role === "admin",
+        (candidate as { role?: string; canCreateOrganizations?: boolean }).role === "admin" ||
+        (candidate as { canCreateOrganizations?: boolean }).canCreateOrganizations === true,
       teams: { enabled: true, maximumTeams: 50, allowRemovingAllTeams: false },
       invitationExpiresIn: 60 * 60 * 48,
       cancelPendingInvitationsOnReInvite: true,
       requireEmailVerificationOnInvitation: true,
+      organizationHooks: {
+        // Better Auth owns membership mutations. These hooks make the last
+        // owner invariant hold even when its own endpoints are called.
+        beforeRemoveMember: async ({ member: target }: any) => {
+          if (target.role !== "owner") return;
+          const owners = await db
+            .select({ id: member.id })
+            .from(member)
+            .where(and(eq(member.organizationId, target.organizationId), eq(member.role, "owner")));
+          if (owners.length <= 1) {
+            throw new APIError("BAD_REQUEST", { message: "The last owner cannot be removed" });
+          }
+        },
+        beforeUpdateMemberRole: async ({ member: target, newRole }: any) => {
+          if (target.role !== "owner" || newRole === "owner") return;
+          const owners = await db
+            .select({ id: member.id })
+            .from(member)
+            .where(and(eq(member.organizationId, target.organizationId), eq(member.role, "owner")));
+          if (owners.length <= 1) {
+            throw new APIError("BAD_REQUEST", { message: "The last owner cannot be demoted" });
+          }
+        },
+        afterCreateInvitation: async ({ invitation, inviter }: any) => {
+          await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: inviter.id, action: "invitation.created", targetType: "invitation", targetId: invitation.id, metadata: JSON.stringify({ organizationId: invitation.organizationId, email: invitation.email, role: invitation.role }) });
+        },
+        afterAcceptInvitation: async ({ invitation, user }: any) => {
+          await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: user.id, action: "invitation.accepted", targetType: "invitation", targetId: invitation.id, metadata: JSON.stringify({ organizationId: invitation.organizationId }) });
+        },
+        afterCancelInvitation: async ({ invitation, cancelledBy }: any) => {
+          await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: cancelledBy.id, action: "invitation.revoked", targetType: "invitation", targetId: invitation.id, metadata: JSON.stringify({ organizationId: invitation.organizationId }) });
+        },
+        afterCreateTeam: async ({ team, user }: any) => {
+          await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: user.id, action: "team.created", targetType: "team", targetId: team.id, metadata: JSON.stringify({ organizationId: team.organizationId }) });
+        },
+        afterUpdateTeam: async ({ team, user }: any) => {
+          await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: user.id, action: "team.updated", targetType: "team", targetId: team.id, metadata: JSON.stringify({ organizationId: team.organizationId }) });
+        },
+        afterDeleteTeam: async ({ team, user }: any) => {
+          await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: user.id, action: "team.deleted", targetType: "team", targetId: team.id, metadata: JSON.stringify({ organizationId: team.organizationId }) });
+        },
+      },
       sendInvitationEmail: async ({ email, id, organization: invitedOrganization, role }) => {
         const dashboardUrl = env.DASHBOARD_URL ?? env.BETTER_AUTH_URL;
         await sendRequiredAuthEmail({
           to: email,
           subject: `Invitation to ${invitedOrganization.name}`,
-          text: `You were invited as ${role} to ${invitedOrganization.name}. Open ${dashboardUrl}/join-organization?invitationId=${encodeURIComponent(id)} to accept the invitation.`,
+          text: `You were invited as ${role} to ${invitedOrganization.name}. Open ${dashboardUrl}/accept-invite/${encodeURIComponent(id)} to accept the invitation.`,
         });
       },
     }),

@@ -13,11 +13,9 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
+import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
-import {
-  hasOrganizationPermission,
-  resolveOrganizationAccess,
-} from "../middleware/organization-policy.js";
+import { resolveOrganizationAccess } from "../middleware/organization-policy.js";
 import {
   reconcileDeployment,
   stopApplicationWorkloads,
@@ -89,10 +87,9 @@ const deploymentRequest = z.object({
 });
 
 async function getScope(request: Request, orgSlug: string) {
-  return resolveOrganizationAccess(request, orgSlug);
+  const scope = await resolveOrganizationAccess(request, orgSlug);
+  return scope ? { ...scope, permissions: await resolveRolePermissions(scope.membership.role, scope.org.id) } : null;
 }
-
-const canManage = (role: string) => hasOrganizationPermission(role, "manage");
 
 async function getProjectScope(request: Request, orgSlug: string, projectId: string) {
   const scope = await getScope(request, orgSlug);
@@ -164,8 +161,7 @@ routes.get("/:orgSlug/projects/:projectId/applications", async (c) => {
 routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(scope.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!scope.permissions.includes("applications.create")) return c.json({ error: "Permission required: applications.create" }, 403);
   const parsed = applicationInput.safeParse(await c.req.json());
   if (!parsed.success)
     return c.json({ error: "Invalid application data", issues: parsed.error.flatten() }, 400);
@@ -200,8 +196,7 @@ routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
 routes.patch("/:orgSlug/projects/:projectId/applications/:applicationId", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(scope.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!scope.permissions.includes("applications.update")) return c.json({ error: "Permission required: applications.update" }, 403);
   const parsed = applicationPatch.safeParse(await c.req.json());
   if (!parsed.success || Object.keys(parsed.data).length === 0)
     return c.json({ error: "Invalid application data" }, 400);
@@ -243,8 +238,7 @@ routes.patch("/:orgSlug/projects/:projectId/applications/:applicationId", async 
 routes.delete("/:orgSlug/projects/:projectId/applications/:applicationId", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(scope.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!scope.permissions.includes("applications.delete")) return c.json({ error: "Permission required: applications.delete" }, 403);
   const current = await db.query.applications.findFirst({
     where: and(
       eq(applications.id, c.req.param("applicationId")),
@@ -329,8 +323,7 @@ routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/runtime", 
 routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(scope.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!scope.permissions.includes("applications.update")) return c.json({ error: "Permission required: applications.update" }, 403);
   const application = await db.query.applications.findFirst({
     where: and(
       eq(applications.id, c.req.param("applicationId")),
@@ -393,8 +386,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
 routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/stop", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(scope.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!scope.permissions.includes("applications.update")) return c.json({ error: "Permission required: applications.update" }, 403);
   const application = await db.query.applications.findFirst({
     where: and(
       eq(applications.id, c.req.param("applicationId")),

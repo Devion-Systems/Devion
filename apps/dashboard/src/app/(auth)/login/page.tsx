@@ -3,7 +3,7 @@
 import { ArrowRight, AtSign, Fingerprint, KeyRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { Suspense, type FormEvent, useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
 import { useI18n } from "@/lib/i18n";
@@ -15,7 +15,7 @@ import {
   AuthPanel,
 } from "../_components/AuthPrimitives";
 
-export default function LoginPage() {
+function LoginContent() {
   const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -189,5 +189,13 @@ export default function LoginPage() {
         </Link>
       </div>
     </AuthPanel>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
   );
 }

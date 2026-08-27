@@ -14,6 +14,9 @@ export const user = pgTable("user", {
     .notNull(),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
   role: text("role"),
+  // Platform administrators grant this explicitly. Organization creation is
+  // therefore closed by default without preventing delegated provisioning.
+  canCreateOrganizations: boolean("can_create_organizations").default(false).notNull(),
   banned: boolean("banned").default(false),
   banReason: text("ban_reason"),
   banExpires: timestamp("ban_expires"),
@@ -232,6 +235,43 @@ export const member = pgTable(
   ],
 );
 
+/** Devion-specific permissions layered on Better Auth memberships. */
+export const organizationRole = pgTable(
+  "organization_role",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    immutable: boolean("immutable").default(false).notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("organizationRole_organizationId_idx").on(table.organizationId),
+    index("organizationRole_createdBy_idx").on(table.createdBy),
+  ],
+);
+
+export const organizationRolePermission = pgTable(
+  "organization_role_permission",
+  {
+    roleId: text("role_id")
+      .notNull()
+      .references(() => organizationRole.id, { onDelete: "cascade" }),
+    permission: text("permission").notNull(),
+  },
+  (table) => [
+    index("organizationRolePermission_roleId_idx").on(table.roleId),
+    index("organizationRolePermission_permission_idx").on(table.permission),
+  ],
+);
+
 export const invitation = pgTable(
   "invitation",
   {
@@ -305,6 +345,19 @@ export const organizationRelations = relations(organization, ({ many }) => ({
   teams: many(team),
   members: many(member),
   invitations: many(invitation),
+  roles: many(organizationRole),
+}));
+
+export const organizationRoleRelations = relations(organizationRole, ({ one, many }) => ({
+  organization: one(organization, {
+    fields: [organizationRole.organizationId],
+    references: [organization.id],
+  }),
+  createdByUser: one(user, {
+    fields: [organizationRole.createdBy],
+    references: [user.id],
+  }),
+  permissions: many(organizationRolePermission),
 }));
 
 export const teamRelations = relations(team, ({ one, many }) => ({

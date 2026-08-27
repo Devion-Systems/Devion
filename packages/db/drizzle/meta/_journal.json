@@ -141,6 +141,27 @@
       "when": 1787875200000,
       "tag": "0019_api_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787961600000,
+      "tag": "0020_rate_limit_counters",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788048000000,
+      "tag": "0021_user_organization_creation_permission",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788134400000,
+      "tag": "0022_organization_custom_roles",
+      "breakpoints": true
     }
   ]
 }

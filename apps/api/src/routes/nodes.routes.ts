@@ -16,11 +16,9 @@ import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
+import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
-import {
-  hasOrganizationPermission,
-  resolveOrganizationAccess,
-} from "../middleware/organization-policy.js";
+import { resolveOrganizationAccess } from "../middleware/organization-policy.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
@@ -89,10 +87,13 @@ function createSecret() {
 function secretMatches(candidate: string, expected: string) {
   return timingSafeEqual(Buffer.from(tokenHash(candidate)), Buffer.from(tokenHash(expected)));
 }
-const manager = (role: string) => hasOrganizationPermission(role, "manage");
-
 async function organizationAccess(request: Request, slug: string) {
-  return resolveOrganizationAccess(request, slug);
+  const access = await resolveOrganizationAccess(request, slug);
+  if (!access) return null;
+  return {
+    ...access,
+    permissions: await resolveRolePermissions(access.membership.role, access.org.id),
+  };
 }
 
 async function agentIdentity(request: Request) {
@@ -115,8 +116,8 @@ routes.use("/organizations/*", requireAuthenticatedUser);
 routes.post("/organizations/:orgSlug/nodes/registration-tokens", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
-  if (!manager(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("nodes.manage"))
+    return c.json({ error: "Permission required: nodes.manage" }, 403);
   const parsed = z
     .object({ expiresInSeconds: z.number().int().min(60).max(86_400).default(3_600) })
     .safeParse(await c.req.json().catch(() => ({})));
@@ -135,6 +136,8 @@ routes.post("/organizations/:orgSlug/nodes/registration-tokens", async (c) => {
 routes.get("/organizations/:orgSlug/nodes", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+  if (!access.permissions.includes("nodes.read"))
+    return c.json({ error: "Permission required: nodes.read" }, 403);
   const items = await db
     .select({
       id: nodes.id,
@@ -164,6 +167,8 @@ routes.get("/organizations/:orgSlug/nodes", async (c) => {
 routes.get("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
+  if (!access.permissions.includes("nodes.read"))
+    return c.json({ error: "Permission required: nodes.read" }, 403);
   const node = await db.query.nodes.findFirst({
     where: and(
       eq(nodes.id, c.req.param("nodeId")),
@@ -198,8 +203,8 @@ routes.get("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
 routes.patch("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const access = await organizationAccess(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
-  if (!manager(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("nodes.manage"))
+    return c.json({ error: "Permission required: nodes.manage" }, 403);
   const parsed = nodeSettingsInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid node settings" }, 400);
   const updated = await db

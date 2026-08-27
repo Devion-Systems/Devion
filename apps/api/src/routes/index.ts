@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { csrfOriginMiddleware } from "../middleware/csrf-origin.js";
+import { requireOrganizationAccess } from "../middleware/organization-policy.js";
 import type { AppEnv } from "../types/env.js";
 import { adminOrganizationRoutes } from "./admin-organizations.routes.js";
 import { aiGatewayRoutes } from "./ai-gateway.routes.js";
@@ -14,6 +15,7 @@ import { gameServerRoutes } from "./game-servers.routes.js";
 import { healthRoutes } from "./health.routes.js";
 import { managedDatabaseRoutes } from "./managed-databases.routes.js";
 import { nodeRoutes } from "./nodes.routes.js";
+import { organizationRbacRoutes } from "./organization-rbac.routes.js";
 import { projectRoutes } from "./projects.routes.js";
 import { setupRoutes } from "./setup.routes.js";
 import { systemUpdateRoutes } from "./system-updates.routes.js";
@@ -30,6 +32,7 @@ const routes = new Hono<AppEnv>();
 // configured dashboard origins when the request comes from a browser.
 routes.use("/organizations/*", csrfOriginMiddleware());
 routes.use("/api/admin/*", csrfOriginMiddleware());
+routes.use("/organizations/:orgSlug/*", requireOrganizationAccess);
 
 // Health checks (no /api prefix — exposed at root for probes)
 routes.route("/health", healthRoutes);
@@ -63,5 +66,6 @@ routes.route("/organizations", environmentRoutes);
 routes.route("/organizations", gameServerRoutes);
 routes.route("/organizations", managedDatabaseRoutes);
 routes.route("/organizations", teamRoutes);
+routes.route("/organizations", organizationRbacRoutes);
 
 export { routes };

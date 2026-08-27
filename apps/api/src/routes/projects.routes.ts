@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
+import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { DnsManager } from "../lib/network/dns.js";
 import { type TraefikDomain, TraefikManager } from "../lib/network/traefik.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
@@ -93,12 +94,9 @@ async function getAuthorizedOrganization(request: Request, slug: string) {
   });
   if (!membership) return null;
 
-  return { organization: organizationRecord, membership, userId: session.user.id };
+  return { organization: organizationRecord, membership, permissions: await resolveRolePermissions(membership.role, organizationRecord.id), userId: session.user.id };
 }
 
-function canManageOrganization(role: string) {
-  return role === "owner" || role === "admin";
-}
 
 /** Returns the organisation and the caller's membership for the dashboard shell. */
 projectRoutes.get("/:orgSlug", async (c) => {
@@ -175,8 +173,7 @@ projectRoutes.get("/:orgSlug/dashboard", async (c) => {
 projectRoutes.post("/:orgSlug/projects", async (c) => {
   const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
-  if (!canManageOrganization(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("projects.create")) return c.json({ error: "Permission required: projects.create" }, 403);
 
   const payload = projectInputSchema.safeParse(await c.req.json());
   if (!payload.success)
@@ -279,8 +276,7 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains", async (c) => {
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManageOrganization(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("projects.update")) return c.json({ error: "Permission required: projects.update" }, 403);
   const payload = domainInputSchema.safeParse(await c.req.json());
   if (!payload.success) return c.json({ error: "Invalid hostname" }, 400);
 
@@ -346,8 +342,7 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManageOrganization(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("projects.update")) return c.json({ error: "Permission required: projects.update" }, 403);
   const payload = domainInputSchema.partial().safeParse(await c.req.json());
   if (!payload.success || Object.keys(payload.data).length === 0)
     return c.json({ error: "Invalid domain update" }, 400);
@@ -422,8 +417,7 @@ projectRoutes.delete("/:orgSlug/projects/:projectId/domains/:domainId", async (c
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManageOrganization(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("projects.update")) return c.json({ error: "Permission required: projects.update" }, 403);
   const current = await db.query.projectDomains.findFirst({
     where: and(
       eq(projectDomains.id, c.req.param("domainId")),
@@ -471,8 +465,7 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains/:domainId/verify", asy
     c.req.param("projectId"),
   );
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManageOrganization(access.membership.role))
-    return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("projects.update")) return c.json({ error: "Permission required: projects.update" }, 403);
   const domain = await db.query.projectDomains.findFirst({
     where: and(
       eq(projectDomains.id, c.req.param("domainId")),

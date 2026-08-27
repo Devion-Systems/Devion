@@ -34,7 +34,13 @@ export const corsMiddleware = (allowedOrigins?: string[]) => {
   return cors({
     origin: (origin) => (origins.includes(origin) ? origin : ""),
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Request-Id", "X-Devion-AI-Key"],
+    allowHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-API-Key",
+      "X-Request-Id",
+      "X-Devion-AI-Key",
+    ],
     exposeHeaders: ["X-Request-Id"],
     maxAge: 86400,
     credentials: true,

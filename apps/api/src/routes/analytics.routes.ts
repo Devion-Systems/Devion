@@ -89,6 +89,7 @@ analyticsRoutes.get("/users", async (c) => {
       email: user.email,
       emailVerified: user.emailVerified,
       role: user.role,
+      canCreateOrganizations: user.canCreateOrganizations,
       createdAt: user.createdAt,
     })
     .from(user)
@@ -153,7 +154,7 @@ analyticsRoutes.get("/users/:userId", async (c) => {
 
   return c.json({ user: account, memberships, sessions });
 });
-const userAction = z.object({ role: z.enum(["admin", "user", "moderator"]).optional(), banned: z.boolean().optional(), banReason: z.string().max(500).optional() });
+const userAction = z.object({ role: z.enum(["admin", "user", "moderator"]).optional(), canCreateOrganizations: z.boolean().optional(), banned: z.boolean().optional(), banReason: z.string().max(500).optional() });
 analyticsRoutes.patch("/users/:userId", async (c) => {
   const input = userAction.safeParse(await c.req.json()); if (!input.success) return c.json({ error: "Invalid user action" }, 400);
   const current = await auth.api.getSession({ headers: c.req.raw.headers }); if (!current) return c.json({ error: "Unauthorized" }, 401);

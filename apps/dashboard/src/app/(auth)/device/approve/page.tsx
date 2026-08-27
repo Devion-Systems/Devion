@@ -2,7 +2,7 @@
 
 import { Check, ShieldAlert, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
 import { useSession } from "@/features/auth/hooks/hooks";
@@ -18,7 +18,7 @@ function normalizeCode(code: string | null) {
 
 type DeviceRequest = { client_id?: string; scope?: string };
 
-export default function DeviceApprovalPage() {
+function DeviceApprovalContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userCode = normalizeCode(searchParams.get("user_code"));
@@ -143,5 +143,13 @@ export default function DeviceApprovalPage() {
         <p className="mt-5 text-center text-xs text-red-200">{error}</p>
       ) : null}
     </AuthPanel>
+  );
+}
+
+export default function DeviceApprovalPage() {
+  return (
+    <Suspense fallback={null}>
+      <DeviceApprovalContent />
+    </Suspense>
   );
 }

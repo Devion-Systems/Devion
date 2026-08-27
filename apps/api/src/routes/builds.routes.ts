@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import { createBuilderRun, cancelBuilderRun, getBuilderLogs } from "../features/builds/builder-client.js";
 import { auth } from "../features/auth/config.js";
+import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import type { AppEnv } from "../types/env.js";
 
@@ -23,9 +24,8 @@ async function scope(request: Request, orgSlug: string, projectId: string) {
   const org = await db.query.organization.findFirst({ where: eq(organization.slug, orgSlug) }); if (!org) return null;
   const membership = await db.query.member.findFirst({ where: and(eq(member.organizationId, org.id), eq(member.userId, session.user.id)) }); if (!membership) return null;
   const project = await db.query.projects.findFirst({ where: and(eq(projects.id, projectId), eq(projects.organizationId, org.id)) });
-  return project ? { org, membership, project, userId: session.user.id } : null;
+  return project ? { org, membership, permissions: await resolveRolePermissions(membership.role, org.id), project, userId: session.user.id } : null;
 }
-function canManage(role: string) { return role === "owner" || role === "admin"; }
 
 function validateRepository(value: string) {
   const url = new URL(value);
@@ -71,7 +71,7 @@ async function createBuild(input: { app: typeof applications.$inferSelect; organ
 
 routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/builds", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(access.membership.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("builds.create")) return c.json({ error: "Permission required: builds.create" }, 403);
   const app = await db.query.applications.findFirst({ where: and(eq(applications.id, c.req.param("applicationId")), eq(applications.projectId, access.project.id)) });
   if (!app) return c.json({ error: "Application not found" }, 404);
   if (app.sourceType !== "git") return c.json({ error: "Builds are available only for Git applications" }, 409);
@@ -82,11 +82,13 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/builds", 
 
 routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/builds", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!access.permissions.includes("builds.read")) return c.json({ error: "Permission required: builds.read" }, 403);
   return c.json(await db.select().from(builds).where(and(eq(builds.projectId, access.project.id), eq(builds.applicationId, c.req.param("applicationId")))).orderBy(desc(builds.createdAt)));
 });
 
 routes.get("/:orgSlug/projects/:projectId/builds/:buildId", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!access.permissions.includes("builds.read")) return c.json({ error: "Permission required: builds.read" }, 403);
   const build = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) });
   if (!build) return c.json({ error: "Build not found" }, 404);
   const deployment = await db.query.deployments.findFirst({ where: eq(deployments.buildId, build.id) });
@@ -95,6 +97,7 @@ routes.get("/:orgSlug/projects/:projectId/builds/:buildId", async (c) => {
 
 routes.get("/:orgSlug/projects/:projectId/builds/:buildId/logs", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!access.permissions.includes("builds.read")) return c.json({ error: "Permission required: builds.read" }, 403);
   const build = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) });
   if (!build?.builderJobId) return c.json({ error: "Build logs unavailable" }, 404);
   try { return c.json(await getBuilderLogs(build.builderJobId, Number(c.req.query("after") ?? 0))); } catch { return c.json({ error: "Builder logs unavailable" }, 503); }
@@ -102,7 +105,7 @@ routes.get("/:orgSlug/projects/:projectId/builds/:buildId/logs", async (c) => {
 
 routes.post("/:orgSlug/projects/:projectId/builds/:buildId/cancel", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(access.membership.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("builds.cancel")) return c.json({ error: "Permission required: builds.cancel" }, 403);
   const build = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) });
   if (!build?.builderJobId || !["queued", "running", "pushing"].includes(build.status)) return c.json({ error: "Build cannot be cancelled" }, 409);
   await cancelBuilderRun(build.builderJobId); await db.update(builds).set({ status: "cancelled", completedAt: new Date() }).where(eq(builds.id, build.id));
@@ -112,7 +115,7 @@ routes.post("/:orgSlug/projects/:projectId/builds/:buildId/cancel", async (c) =>
 
 routes.post("/:orgSlug/projects/:projectId/builds/:buildId/retry", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
-  if (!canManage(access.membership.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("builds.create")) return c.json({ error: "Permission required: builds.create" }, 403);
   const previous = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) }); if (!previous || !["failed", "cancelled"].includes(previous.status)) return c.json({ error: "Only failed or cancelled builds can be retried" }, 409);
   const app = await db.query.applications.findFirst({ where: eq(applications.id, previous.applicationId) }); if (!app) return c.json({ error: "Application not found" }, 404);
   const config = previous.buildConfiguration as { deployment?: { enabled?: boolean; replicas?: number }; requirements?: { cpuMilli?: number; memoryMib?: number; storageMib?: number } };

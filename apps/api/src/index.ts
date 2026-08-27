@@ -1,14 +1,14 @@
 import {
   createDevionRateLimiters,
   createLogger,
-  createStoreFromEnv,
+  PostgresStore,
   notFoundHandler,
   parseEnv,
   registerProcessGuards,
   resolveOrgContext,
 } from "@repo/core";
 import { auth } from "./features/auth/config.js";
-import { checkDbHealth, closeDbPool } from "@repo/db";
+import { checkDbHealth, closeDbPool, getDbPool } from "@repo/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { syncFeaturesToDatabase } from "./features/feature/sync_features.js";
@@ -32,7 +32,9 @@ const env = parseEnv();
 const logger = createLogger(env, { name: "api" });
 
 const app = new Hono<AppEnv>();
-const rateLimits = createDevionRateLimiters(createStoreFromEnv());
+// PostgreSQL is shared by every API replica and already part of the required
+// production topology. It keeps rate-limit counters consistent across replicas.
+const rateLimits = createDevionRateLimiters(new PostgresStore(getDbPool()));
 
 // --- Global middleware (order matters) ---
 app.use("*", corsMiddleware());

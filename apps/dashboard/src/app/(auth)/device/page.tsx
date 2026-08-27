@@ -2,7 +2,7 @@
 
 import { MonitorSmartphone, ShieldCheck } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
+import { Suspense, type FormEvent, useEffect, useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
 import { useSession } from "@/features/auth/hooks/hooks";
@@ -21,7 +21,7 @@ function normalizeCode(code: string) {
     .toUpperCase();
 }
 
-export default function DeviceAuthorizationPage() {
+function DeviceAuthorizationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session, isLoading } = useSession();
@@ -102,5 +102,13 @@ export default function DeviceAuthorizationPage() {
         <p className="mt-5 text-center text-xs text-red-200">{error}</p>
       ) : null}
     </AuthPanel>
+  );
+}
+
+export default function DeviceAuthorizationPage() {
+  return (
+    <Suspense fallback={null}>
+      <DeviceAuthorizationContent />
+    </Suspense>
   );
 }

@@ -18,6 +18,7 @@ import { and, asc, desc, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
+import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import {
   reconcileDeployment,
@@ -80,11 +81,13 @@ async function scope(request: Request, slug: string) {
   const membership = await db.query.member.findFirst({
     where: and(eq(member.organizationId, org.id), eq(member.userId, session.user.id)),
   });
-  return membership ? { org, role: membership.role, userId: session.user.id } : null;
-}
-
-function manager(role: string) {
-  return role === "owner" || role === "admin";
+  return membership
+    ? {
+        org,
+        permissions: await resolveRolePermissions(membership.role, org.id),
+        userId: session.user.id,
+      }
+    : null;
 }
 
 async function serverWorkload(server: typeof gameServers.$inferSelect) {
@@ -105,10 +108,12 @@ async function managedServer(orgId: string, serverId: string) {
 
 async function hasServerRole(
   serverId: string,
-  access: { role: string; userId: string },
+  access: { permissions: string[]; userId: string },
   required: ServerAccessRole,
 ) {
-  if (manager(access.role)) return true;
+  // Organization-level application management is the broadest grant. Specific
+  // game-server grants remain available for operators and viewers.
+  if (access.permissions.includes("applications.update")) return true;
   const [direct, viaTeam] = await Promise.all([
     db
       .select({ role: gameServerAccess.role })
@@ -135,7 +140,7 @@ routes.get("/:orgSlug/game-servers", async (c) => {
     .from(gameServers)
     .where(eq(gameServers.organizationId, access.org.id))
     .orderBy(asc(gameServers.name));
-  if (manager(access.role)) return c.json(servers);
+  if (access.permissions.includes("applications.read")) return c.json(servers);
   const permitted = await Promise.all(
     servers.map(async (server) =>
       (await hasServerRole(server.id, access, "viewer")) ? server : null,
@@ -148,7 +153,8 @@ routes.get("/:orgSlug/game-servers", async (c) => {
 routes.post("/:orgSlug/game-servers", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Not found" }, 404);
-  if (!manager(access.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!access.permissions.includes("applications.create"))
+    return c.json({ error: "Permission required: applications.create" }, 403);
   const parsed = input.safeParse(await c.req.json());
   if (!parsed.success)
     return c.json(

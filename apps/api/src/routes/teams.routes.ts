@@ -1,11 +1,11 @@
-import { db, member, organization, projects, team, teamMember, user } from "@repo/db";
+import { auditLogs, db, member, organization, projects, team, teamMember, user } from "@repo/db";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
   resolveOrganizationAccess,
-  hasOrganizationPermission,
 } from "../middleware/organization-policy.js";
+import { resolveRolePermissions, type Permission } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import type { AppEnv } from "../types/env.js";
 
@@ -16,9 +16,9 @@ const memberInput = z.object({ userId: z.string().min(1) });
 
 async function access(request: Request, slug: string) {
   const result = await resolveOrganizationAccess(request, slug);
-  return result ? { org: result.org, role: result.membership.role, userId: result.userId } : null;
+  return result ? { org: result.org, permissions: await resolveRolePermissions(result.membership.role, result.org.id), userId: result.userId } : null;
 }
-const canManage = (role: string) => hasOrganizationPermission(role, "manage");
+const can = (scope: { permissions: Permission[] }, permission: Permission) => scope.permissions.includes(permission);
 async function scopedTeam(orgId: string, teamId: string) {
   return db.query.team.findFirst({
     where: and(eq(team.id, teamId), eq(team.organizationId, orgId)),
@@ -71,7 +71,7 @@ routes.get("/:orgSlug/team-members", async (c) => {
 routes.post("/:orgSlug/teams", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.create")) return c.json({ error: "Permission required: teams.create" }, 403);
   const parsed = createInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid team name" }, 400);
   const id = crypto.randomUUID();
@@ -81,6 +81,7 @@ routes.post("/:orgSlug/teams", async (c) => {
   await db
     .insert(teamMember)
     .values({ id: crypto.randomUUID(), teamId: id, userId: scope.userId, createdAt: new Date() });
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: scope.userId, action: "team.created", targetType: "team", targetId: id, metadata: JSON.stringify({ organizationId: scope.org.id }) });
   return c.json({ id, name: parsed.data.name }, 201);
 });
 routes.get("/:orgSlug/teams/:teamId", async (c) => {
@@ -117,7 +118,7 @@ routes.get("/:orgSlug/teams/:teamId", async (c) => {
 routes.patch("/:orgSlug/teams/:teamId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
   const parsed = createInput.partial().safeParse(await c.req.json());
   if (!parsed.success || !parsed.data.name) return c.json({ error: "Invalid team name" }, 400);
   const result = await db
@@ -125,22 +126,26 @@ routes.patch("/:orgSlug/teams/:teamId", async (c) => {
     .set({ name: parsed.data.name })
     .where(and(eq(team.id, c.req.param("teamId")), eq(team.organizationId, scope.org.id)))
     .returning();
-  return result[0] ? c.json(result[0]) : c.json({ error: "Team not found" }, 404);
+  if (!result[0]) return c.json({ error: "Team not found" }, 404);
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: scope.userId, action: "team.updated", targetType: "team", targetId: result[0].id, metadata: JSON.stringify({ organizationId: scope.org.id }) });
+  return c.json(result[0]);
 });
 routes.delete("/:orgSlug/teams/:teamId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.delete")) return c.json({ error: "Permission required: teams.delete" }, 403);
   const result = await db
     .delete(team)
     .where(and(eq(team.id, c.req.param("teamId")), eq(team.organizationId, scope.org.id)))
     .returning({ id: team.id });
-  return result[0] ? c.body(null, 204) : c.json({ error: "Team not found" }, 404);
+  if (!result[0]) return c.json({ error: "Team not found" }, 404);
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: scope.userId, action: "team.deleted", targetType: "team", targetId: result[0].id, metadata: JSON.stringify({ organizationId: scope.org.id }) });
+  return c.body(null, 204);
 });
 routes.post("/:orgSlug/teams/:teamId/members", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
   const parsed = memberInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid member" }, 400);
   if (!(await scopedTeam(scope.org.id, c.req.param("teamId"))))
@@ -168,7 +173,7 @@ routes.post("/:orgSlug/teams/:teamId/members", async (c) => {
 routes.delete("/:orgSlug/teams/:teamId/members/:userId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
   if (!(await scopedTeam(scope.org.id, c.req.param("teamId"))))
     return c.json({ error: "Team not found" }, 404);
   await db
@@ -184,7 +189,7 @@ routes.delete("/:orgSlug/teams/:teamId/members/:userId", async (c) => {
 routes.put("/:orgSlug/teams/:teamId/projects/:projectId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
   const item = await scopedTeam(scope.org.id, c.req.param("teamId"));
   if (!item) return c.json({ error: "Team not found" }, 404);
   const result = await db
@@ -199,7 +204,7 @@ routes.put("/:orgSlug/teams/:teamId/projects/:projectId", async (c) => {
 routes.delete("/:orgSlug/teams/:teamId/projects/:projectId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!canManage(scope.role)) return c.json({ error: "Owner or admin role required" }, 403);
+  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
   const item = await scopedTeam(scope.org.id, c.req.param("teamId"));
   if (!item) return c.json({ error: "Team not found" }, 404);
   const result = await db

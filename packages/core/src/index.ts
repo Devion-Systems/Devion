@@ -2,6 +2,7 @@ export { parseEnv, type CoreEnv } from "./config/env.js";
 export {
   createDevionRateLimiters,
   createStoreFromEnv,
+  PostgresStore,
   resolveOrgContext,
 } from "./firewall/rate-limit.js";
 export type { Brand, RequestId } from "./types/index.js";

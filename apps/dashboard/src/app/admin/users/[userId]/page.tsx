@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 
 type Detail = {
-  user: { name: string; email: string; emailVerified: boolean; role?: string | null; banned?: boolean | null };
+  user: { name: string; email: string; emailVerified: boolean; role?: string | null; canCreateOrganizations: boolean; banned?: boolean | null };
   memberships: {
     organizationId: string;
     organizationName: string;
@@ -40,11 +40,11 @@ export default function AdminUsersDetailPage() {
       </div>
     );
   if (!data) return null;
-  async function update(payload: { role?: string; banned?: boolean }) { await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/analytics/users/${userId}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); void client.invalidateQueries({ queryKey: ["admin", "analytics", "users", userId] }); }
+  async function update(payload: { role?: string; canCreateOrganizations?: boolean; banned?: boolean }) { await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/admin/analytics/users/${userId}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); void client.invalidateQueries({ queryKey: ["admin", "analytics", "users", userId] }); }
   return (
     <div className="space-y-6 p-5 sm:p-7">
       <PageHeader title={data.user.name} description={data.user.email} />
-      <div className="flex flex-wrap gap-2"><Button onClick={() => update({ role: data.user.role === "admin" ? "user" : "admin" })}>{data.user.role === "admin" ? "Adminrechte entfernen" : "Zum Admin machen"}</Button><Button variant="destructive" onClick={() => update({ banned: !data.user.banned })}>{data.user.banned ? "Konto entsperren" : "Konto sperren"}</Button></div>
+      <div className="flex flex-wrap gap-2"><Button onClick={() => update({ role: data.user.role === "admin" ? "user" : "admin" })}>{data.user.role === "admin" ? "Adminrechte entfernen" : "Zum Admin machen"}</Button><Button variant="outline" onClick={() => update({ canCreateOrganizations: !data.user.canCreateOrganizations })}>{data.user.canCreateOrganizations ? "Org-Erstellung sperren" : "Org-Erstellung erlauben"}</Button><Button variant="destructive" onClick={() => update({ banned: !data.user.banned })}>{data.user.banned ? "Konto entsperren" : "Konto sperren"}</Button></div>
       <div className="grid gap-4 md:grid-cols-3">
         <section className="rounded-2xl border border-white/[0.07] bg-[#172128] p-5">
           <UserRound className="size-5 text-[#74b9ff]" />
