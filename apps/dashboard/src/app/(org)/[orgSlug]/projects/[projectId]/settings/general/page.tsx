@@ -1,131 +1,18 @@
-'use client'
-
-import { useState } from 'react'
-import { useParams } from 'next/navigation'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { PageHeader } from '@/components/layout/page-header'
-import { Button } from '@/components/ui/button'
-import { Save } from 'lucide-react'
-
-type ProjectSettings = {
-  name: string
-  description: string
-  buildCommand: string
-  startCommand: string
-  rootDirectory: string
-  port: number
-}
-
-function useProjectSettings(orgSlug: string, projectId: string) {
-  return useQuery<ProjectSettings>({
-    queryKey: ['orgs', orgSlug, 'projects', projectId, 'settings'],
-    queryFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-      const res = await fetch(
-        `${baseUrl}/organizations/${orgSlug}/projects/${projectId}/settings`,
-        { credentials: 'include' }
-      )
-      if (!res.ok) throw new Error('Einstellungen nicht verfügbar')
-      return res.json()
-    },
-    placeholderData: {
-      name: projectId,
-      description: 'Eine Devion-Applikation',
-      buildCommand: 'npm run build',
-      startCommand: 'npm start',
-      rootDirectory: '/',
-      port: 3000,
-    },
-  })
-}
-
-function FieldGroup({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-8">
-      <div className="sm:w-56 sm:shrink-0">
-        <p className="text-sm font-medium text-zinc-200">{label}</p>
-        {description && <p className="mt-0.5 text-xs text-zinc-600">{description}</p>}
-      </div>
-      <div className="flex-1">{children}</div>
-    </div>
-  )
-}
-
-function Input({ value, onChange, type = 'text', placeholder }: {
-  value: string | number; onChange: (v: string) => void; type?: string; placeholder?: string
-}) {
-  return (
-    <input
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-[#0984e3]/50 focus:outline-none focus:ring-2 focus:ring-[#0984e3]/20"
-    />
-  )
-}
-
+"use client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Save } from "lucide-react";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
+type Settings = { name: string; slug: string; description: string | null };
+type Project = Settings & { permissions: string[] };
+const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 export default function ProjectSettingsGeneralPage() {
-  const { orgSlug, projectId } = useParams<{ orgSlug: string; projectId: string }>()
-  const { data: settings } = useProjectSettings(orgSlug, projectId)
-  const [form, setForm] = useState<Partial<ProjectSettings>>({})
-
-  const values = { ...settings, ...form }
-  const set = (key: keyof ProjectSettings) => (v: string) =>
-    setForm((prev) => ({ ...prev, [key]: v }))
-
-  const save = useMutation({
-    mutationFn: async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-      const res = await fetch(
-        `${baseUrl}/organizations/${orgSlug}/projects/${projectId}/settings`,
-        { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }
-      )
-      if (!res.ok) throw new Error('Speichern fehlgeschlagen')
-    },
-  })
-
-  return (
-    <div className="space-y-8">
-      <PageHeader title="Allgemeine Einstellungen" />
-
-      <div className="space-y-6 divide-y divide-white/[0.06]">
-        <FieldGroup label="Projektname">
-          <Input value={values.name ?? ''} onChange={set('name')} />
-        </FieldGroup>
-        <div className="pt-6">
-          <FieldGroup label="Beschreibung" description="Kurze Beschreibung des Projekts">
-            <Input value={values.description ?? ''} onChange={set('description')} placeholder="Meine Anwendung" />
-          </FieldGroup>
-        </div>
-        <div className="pt-6">
-          <FieldGroup label="Build-Befehl" description="Wird vor dem Start ausgeführt">
-            <Input value={values.buildCommand ?? ''} onChange={set('buildCommand')} placeholder="npm run build" />
-          </FieldGroup>
-        </div>
-        <div className="pt-6">
-          <FieldGroup label="Start-Befehl" description="Startet die Anwendung">
-            <Input value={values.startCommand ?? ''} onChange={set('startCommand')} placeholder="npm start" />
-          </FieldGroup>
-        </div>
-        <div className="pt-6">
-          <FieldGroup label="Root-Verzeichnis" description="Pfad relativ zum Repository-Root">
-            <Input value={values.rootDirectory ?? ''} onChange={set('rootDirectory')} placeholder="/" />
-          </FieldGroup>
-        </div>
-        <div className="pt-6">
-          <FieldGroup label="Port" description="Der Port, auf dem die App lauscht">
-            <Input value={values.port ?? ''} onChange={set('port')} type="number" placeholder="3000" />
-          </FieldGroup>
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <Button onClick={() => save.mutate()} disabled={save.isPending} className="gap-1.5">
-          <Save className="h-3.5 w-3.5" />
-          {save.isPending ? 'Speichere …' : 'Speichern'}
-        </Button>
-      </div>
-    </div>
-  )
+  const { orgSlug, projectId } = useParams<{ orgSlug: string; projectId: string }>(); const client = useQueryClient();
+  const project = useQuery<Project>({ queryKey: ["orgs", orgSlug, "projects", projectId], queryFn: async () => { const response = await fetch(api(`/organizations/${orgSlug}/projects/${projectId}`), { credentials: "include" }); if (!response.ok) throw new Error("Projekt konnte nicht geladen werden"); return response.json(); } });
+  const [form, setForm] = useState<Settings>({ name: "", slug: "", description: null }); useEffect(() => { if (project.data) setForm({ name: project.data.name, slug: project.data.slug, description: project.data.description }); }, [project.data]);
+  const save = useMutation({ mutationFn: async () => { const response = await fetch(api(`/organizations/${orgSlug}/projects/${projectId}`), { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }); if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? "Speichern fehlgeschlagen"); }, onSuccess: () => void client.invalidateQueries({ queryKey: ["orgs", orgSlug, "projects", projectId] }) });
+  const canUpdate = project.data?.permissions.includes("projects.update") ?? false;
+  return <div className="space-y-8 p-6"><PageHeader title="Allgemeine Einstellungen" description="Name, URL-Slug und Beschreibung dieses Projects." />{project.isLoading ? <p className="text-sm text-zinc-500">Projekt wird geladen …</p> : <div className="space-y-5 rounded-2xl border border-white/[0.07] bg-[#172128] p-5"><label className="block text-sm text-zinc-300">Name<input disabled={!canUpdate} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="mt-2 h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-zinc-100 disabled:opacity-60" /></label><label className="block text-sm text-zinc-300">Slug<input disabled={!canUpdate} value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value.toLowerCase() })} className="mt-2 h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 font-mono text-zinc-100 disabled:opacity-60" /></label><label className="block text-sm text-zinc-300">Beschreibung<textarea disabled={!canUpdate} value={form.description ?? ""} onChange={(event) => setForm({ ...form, description: event.target.value || null })} className="mt-2 min-h-24 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] p-3 text-zinc-100 disabled:opacity-60" /></label>{save.error ? <p role="alert" className="text-sm text-red-300">{save.error.message}</p> : null}{canUpdate ? <div className="flex justify-end"><Button onClick={() => save.mutate()} disabled={save.isPending}><Save className="size-3.5" />{save.isPending ? "Speichere …" : "Speichern"}</Button></div> : <p className="text-sm text-zinc-500">Du hast keine Berechtigung, dieses Project zu bearbeiten.</p>}</div>}</div>;
 }

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 export type ResourceStatus =
   | "healthy" | "ready" | "deploying" | "starting" | "degraded"
   | "failed" | "failing" | "stopped" | "idle" | "unknown"
-  | "queued" | "running" | "pushing" | "succeeded" | "cancelled";
+  | "queued" | "running" | "pushing" | "succeeded" | "cancelled" | "active" | "archived";
 
 const config: Record<ResourceStatus, { label: string; className: string; icon: typeof CheckCircle2 }> = {
   healthy: { label: "Gesund", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300", icon: CheckCircle2 },
@@ -29,6 +29,8 @@ const config: Record<ResourceStatus, { label: string; className: string; icon: t
   pushing: { label: "Image Push", className: "border-violet-400/20 bg-violet-400/10 text-violet-300", icon: Clock3 },
   succeeded: { label: "Erfolgreich", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300", icon: CheckCircle2 },
   cancelled: { label: "Abgebrochen", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
+  active: { label: "Aktiv", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300", icon: CheckCircle2 },
+  archived: { label: "Archiviert", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
 };
 
 export function ResourceStatusBadge({ status, className }: { status?: string | null; className?: string }) {

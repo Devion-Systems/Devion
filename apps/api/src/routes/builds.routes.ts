@@ -1,12 +1,11 @@
-import { applications, auditLogs, builds, db, deployments, member, organization, projects } from "@repo/db";
+import { applications, auditLogs, builds, db, deployments } from "@repo/db";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { isIP } from "node:net";
 import { z } from "zod";
 import { createBuilderRun, cancelBuilderRun, getBuilderLogs } from "../features/builds/builder-client.js";
-import { auth } from "../features/auth/config.js";
-import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
+import { resolveProjectAccess } from "../features/projects/access.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
@@ -20,11 +19,8 @@ const triggerInput = z.object({
 });
 
 async function scope(request: Request, orgSlug: string, projectId: string) {
-  const session = await auth.api.getSession({ headers: request.headers }); if (!session) return null;
-  const org = await db.query.organization.findFirst({ where: eq(organization.slug, orgSlug) }); if (!org) return null;
-  const membership = await db.query.member.findFirst({ where: and(eq(member.organizationId, org.id), eq(member.userId, session.user.id)) }); if (!membership) return null;
-  const project = await db.query.projects.findFirst({ where: and(eq(projects.id, projectId), eq(projects.organizationId, org.id)) });
-  return project ? { org, membership, permissions: await resolveRolePermissions(membership.role, org.id), project, userId: session.user.id } : null;
+  const access = await resolveProjectAccess(request, orgSlug, projectId);
+  return access ? { org: access.organization, permissions: access.permissions, project: access.project, userId: access.userId } : null;
 }
 
 function validateRepository(value: string) {
@@ -65,13 +61,14 @@ async function createBuild(input: { app: typeof applications.$inferSelect; organ
     await db.update(builds).set({ status: "failed", errorCode: "BUILDER_UNAVAILABLE", errorMessage: error instanceof Error ? error.message : "Builder unavailable", completedAt: new Date() }).where(eq(builds.id, buildId));
     throw error;
   }
-  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: input.userId, action: input.trigger === "retry" ? "build.retried" : "build.created", targetType: "build", targetId: buildId, metadata: JSON.stringify({ applicationId: input.app.id, deploy: input.trigger !== "build" }) });
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: input.userId, action: input.trigger === "retry" ? "build.retried" : "build.created", targetType: "build", targetId: buildId, metadata: JSON.stringify({ projectId: input.projectId, applicationId: input.app.id, deploy: input.trigger !== "build" }) });
   return buildId;
 }
 
 routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/builds", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
   if (!access.permissions.includes("builds.create")) return c.json({ error: "Permission required: builds.create" }, 403);
+  if (access.project.status === "archived") return c.json({ error: "Archived projects cannot start builds" }, 409);
   const app = await db.query.applications.findFirst({ where: and(eq(applications.id, c.req.param("applicationId")), eq(applications.projectId, access.project.id)) });
   if (!app) return c.json({ error: "Application not found" }, 404);
   if (app.sourceType !== "git") return c.json({ error: "Builds are available only for Git applications" }, 409);
@@ -109,13 +106,14 @@ routes.post("/:orgSlug/projects/:projectId/builds/:buildId/cancel", async (c) =>
   const build = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) });
   if (!build?.builderJobId || !["queued", "running", "pushing"].includes(build.status)) return c.json({ error: "Build cannot be cancelled" }, 409);
   await cancelBuilderRun(build.builderJobId); await db.update(builds).set({ status: "cancelled", completedAt: new Date() }).where(eq(builds.id, build.id));
-  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "build.cancelled", targetType: "build", targetId: build.id });
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "build.cancelled", targetType: "build", targetId: build.id, metadata: JSON.stringify({ projectId: access.project.id }) });
   return c.json({ status: "cancelled" });
 });
 
 routes.post("/:orgSlug/projects/:projectId/builds/:buildId/retry", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!access) return c.json({ error: "Project not found or access denied" }, 404);
   if (!access.permissions.includes("builds.create")) return c.json({ error: "Permission required: builds.create" }, 403);
+  if (access.project.status === "archived") return c.json({ error: "Archived projects cannot start builds" }, 409);
   const previous = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) }); if (!previous || !["failed", "cancelled"].includes(previous.status)) return c.json({ error: "Only failed or cancelled builds can be retried" }, 409);
   const app = await db.query.applications.findFirst({ where: eq(applications.id, previous.applicationId) }); if (!app) return c.json({ error: "Application not found" }, 404);
   const config = previous.buildConfiguration as { deployment?: { enabled?: boolean; replicas?: number }; requirements?: { cpuMilli?: number; memoryMib?: number; storageMib?: number } };

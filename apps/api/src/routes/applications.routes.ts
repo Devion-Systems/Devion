@@ -4,23 +4,19 @@ import {
   auditLogs,
   db,
   deployments,
-  member,
-  organization,
   projects,
   workloads,
 } from "@repo/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import { auth } from "../features/auth/config.js";
-import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
-import { resolveOrganizationAccess } from "../middleware/organization-policy.js";
 import {
   reconcileDeployment,
   stopApplicationWorkloads,
 } from "../modules/deployments/controller.js";
 import type { AppEnv } from "../types/env.js";
+import { listAccessibleProjects, resolveProjectAccess } from "../features/projects/access.js";
 
 const routes = new Hono<AppEnv>();
 routes.use("/*", requireAuthenticatedUser);
@@ -86,27 +82,19 @@ const deploymentRequest = z.object({
   requiredLabels: z.record(z.string().min(1).max(64)).optional(),
 });
 
-async function getScope(request: Request, orgSlug: string) {
-  const scope = await resolveOrganizationAccess(request, orgSlug);
-  return scope ? { ...scope, permissions: await resolveRolePermissions(scope.membership.role, scope.org.id) } : null;
-}
-
 async function getProjectScope(request: Request, orgSlug: string, projectId: string) {
-  const scope = await getScope(request, orgSlug);
-  if (!scope) return null;
-  const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, projectId), eq(projects.organizationId, scope.org.id)),
-  });
-  return project ? { ...scope, project } : null;
+  const access = await resolveProjectAccess(request, orgSlug, projectId);
+  return access ? { org: access.organization, project: access.project, userId: access.userId, permissions: access.permissions } : null;
 }
 
-function recordAudit(action: string, targetId: string, userId: string, request: Request) {
+function recordAudit(action: string, targetId: string, userId: string, request: Request, projectId: string) {
   return db.insert(auditLogs).values({
     id: crypto.randomUUID(),
     actorId: userId,
     action,
     targetType: "application",
     targetId,
+    metadata: JSON.stringify({ projectId }),
     ipAddress:
       request.headers.get("x-real-ip") ??
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
@@ -115,8 +103,10 @@ function recordAudit(action: string, targetId: string, userId: string, request: 
 }
 
 routes.get("/:orgSlug/applications", async (c) => {
-  const scope = await getScope(c.req.raw, c.req.param("orgSlug"));
+  const scope = await listAccessibleProjects(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Organization not found or access denied" }, 404);
+  const projectIds = scope.projects.map((project) => project.id);
+  if (!projectIds.length) return c.json([]);
   const items = await db
     .select({
       id: applications.id,
@@ -141,7 +131,7 @@ routes.get("/:orgSlug/applications", async (c) => {
     })
     .from(applications)
     .innerJoin(projects, eq(applications.projectId, projects.id))
-    .where(eq(applications.organizationId, scope.org.id))
+    .where(and(eq(applications.organizationId, scope.organization.id), inArray(applications.projectId, projectIds)))
     .orderBy(asc(projects.name), asc(applications.name));
   return c.json(items);
 });
@@ -162,6 +152,7 @@ routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
   if (!scope.permissions.includes("applications.create")) return c.json({ error: "Permission required: applications.create" }, 403);
+  if (scope.project.status === "archived") return c.json({ error: "Archived projects cannot receive new applications" }, 409);
   const parsed = applicationInput.safeParse(await c.req.json());
   if (!parsed.success)
     return c.json({ error: "Invalid application data", issues: parsed.error.flatten() }, 400);
@@ -189,7 +180,7 @@ routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
       return c.json({ error: "An application with this slug already exists in the project" }, 409);
     throw error;
   }
-  await recordAudit("application.created", id, scope.userId, c.req.raw);
+  await recordAudit("application.created", id, scope.userId, c.req.raw, scope.project.id);
   return c.json({ id, slug: parsed.data.slug }, 201);
 });
 
@@ -226,7 +217,7 @@ routes.patch("/:orgSlug/projects/:projectId/applications/:applicationId", async 
       })
       .where(eq(applications.id, current.id))
       .returning();
-    await recordAudit("application.updated", current.id, scope.userId, c.req.raw);
+    await recordAudit("application.updated", current.id, scope.userId, c.req.raw, scope.project.id);
     return c.json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "23505")
@@ -270,7 +261,7 @@ routes.delete("/:orgSlug/projects/:projectId/applications/:applicationId", async
     .where(eq(applications.id, current.id))
     .returning({ id: applications.id });
   if (!removed) return c.json({ error: "Application not found" }, 404);
-  await recordAudit("application.deleted", removed.id, scope.userId, c.req.raw);
+  await recordAudit("application.deleted", removed.id, scope.userId, c.req.raw, scope.project.id);
   return c.body(null, 204);
 });
 
@@ -379,7 +370,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
     message: `Deployment ${deploymentId} queued for agent reconciliation`,
   });
   await reconcileDeployment(deploymentId);
-  await recordAudit("application.deployed", application.id, scope.userId, c.req.raw);
+  await recordAudit("application.deployed", application.id, scope.userId, c.req.raw, scope.project.id);
   return c.json({ deploymentId, status: "deploying", internalPort: application.internalPort }, 202);
 });
 
@@ -415,7 +406,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/stop", as
     status: "succeeded",
     message: "Stop commands queued for agent workloads",
   });
-  await recordAudit("application.stopped", application.id, scope.userId, c.req.raw);
+  await recordAudit("application.stopped", application.id, scope.userId, c.req.raw, scope.project.id);
   return c.json({ status: "stopping" }, 202);
 });
 

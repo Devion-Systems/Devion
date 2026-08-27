@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 const TABS = [
   { label: 'Allgemein',     href: 'general' },
   { label: 'Zugriff',       href: 'access' },
-  { label: 'Integrationen', href: 'integrations' },
+  { label: 'Environments',  href: '../environments' },
   { label: 'Danger Zone',   href: 'danger-zone' },
 ]
 
@@ -21,11 +21,12 @@ export default function ProjectSettingsLayout({ children }: { children: React.Re
       {/* Side nav */}
       <nav className="w-44 shrink-0 space-y-1">
         {TABS.map(({ label, href }) => {
-          const active = pathname.startsWith(`${base}/${href}`)
+          const target = href.startsWith('..') ? `/${orgSlug}/projects/${projectId}/environments` : `${base}/${href}`
+          const active = pathname === target || pathname.startsWith(`${target}/`)
           return (
             <Link
               key={href}
-              href={`${base}/${href}`}
+              href={target}
               className={cn(
                 'block rounded-lg px-3 py-2 text-sm transition-colors',
                 active

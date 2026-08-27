@@ -22,6 +22,9 @@ export const permissionRegistry = [
   ["projects.create", "Projekte", "Projekte erstellen", "Projekte erstellen."],
   ["projects.update", "Projekte", "Projekte ändern", "Projekte und Deployments verwalten."],
   ["projects.delete", "Projekte", "Projekte löschen", "Projekte löschen."],
+  ["projects.archive", "Projekte", "Projekte archivieren", "Projekte archivieren und wiederherstellen."],
+  ["projects.manage_access", "Projekte", "Projektzugriff verwalten", "Projektzugriff und Teams verwalten."],
+  ["projects.manage_environments", "Projekte", "Umgebungen verwalten", "Projektumgebungen erstellen und verwalten."],
   ["applications.read", "Anwendungen", "Anwendungen lesen", "Anwendungen und Laufzeit anzeigen."],
   ["applications.create", "Anwendungen", "Anwendungen erstellen", "Anwendungen in Projekten erstellen."],
   ["applications.update", "Anwendungen", "Anwendungen ändern", "Anwendungen bereitstellen und stoppen."],
@@ -40,8 +43,8 @@ export const allPermissions = permissionRegistry.map(([key]) => key) as Permissi
 const systemPermissions: Record<string, readonly Permission[]> = {
   owner: allPermissions,
   admin: allPermissions.filter((permission) => !["organization.delete"].includes(permission)),
-  developer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "applications.read", "applications.create", "applications.update", "builds.read", "builds.create", "builds.cancel"],
-  member: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "applications.read", "applications.create", "applications.update", "builds.read", "builds.create", "builds.cancel"],
+  developer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "builds.read", "builds.create", "builds.cancel"],
+  member: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "builds.read", "builds.create", "builds.cancel"],
   viewer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "applications.read", "builds.read", "nodes.read", "audit.read"],
 };
 

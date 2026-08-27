@@ -132,7 +132,7 @@ export default function GameServersPage() {
       });
       if (!response.ok)
         throw new Error("Projekte konnten nicht geladen werden");
-      return response.json();
+      return (await response.json()).items as Project[];
     },
   });
   const versionCatalog = useQuery<MinecraftVersion[]>({

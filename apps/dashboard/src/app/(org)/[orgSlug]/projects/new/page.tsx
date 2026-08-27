@@ -43,10 +43,12 @@ export default function NewProjectPage() {
   const router = useRouter();
   const [type, setType] = useState<ProjectType>("git");
   const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [gitUrl, setGitUrl] = useState("");
   const [branch, setBranch] = useState("main");
-  const [teamId, setTeamId] = useState("");
+  const [accessMode, setAccessMode] = useState<"organization" | "team">("organization");
+  const [teamIds, setTeamIds] = useState<string[]>([]);
 
   const { data: teams = [] } = useQuery({
     queryKey: ["organizations", orgSlug, "teams"],
@@ -72,11 +74,12 @@ export default function NewProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          slug: name,
+          slug,
           description,
           type,
           ...(type === "git" ? { gitUrl: gitUrl.trim(), branch: branch.trim() || "main" } : {}),
-          teamId: teamId || undefined,
+          accessMode,
+          teamIds,
         }),
       });
       if (!res.ok) {
@@ -155,17 +158,21 @@ export default function NewProjectPage() {
             id="project-name"
             type="text"
             value={name}
-            onChange={(e) =>
-              setName(e.target.value.toLowerCase().replace(/\s+/g, "-"))
-            }
-            placeholder="mein-projekt"
-            aria-invalid={Boolean(name) && !slugPattern.test(name)}
+            onChange={(e) => {
+              const value = e.target.value;
+              setName(value);
+              if (!slug || slug === name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")) setSlug(value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""));
+            }}
+            placeholder="Production Backend"
+            aria-invalid={Boolean(name) && !name.trim()}
             className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-[#0984e3]/50 focus:outline-none focus:ring-2 focus:ring-[#0984e3]/20"
           />
-          <p className="mt-1 text-[11px] text-zinc-600">
-            Nur Kleinbuchstaben, Zahlen und Bindestriche
-          </p>
-          {name && !slugPattern.test(name) ? <p role="alert" className="mt-1 text-xs text-red-300">Der Name darf nur Kleinbuchstaben, Zahlen und Bindestriche enthalten.</p> : null}
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-zinc-300" htmlFor="project-slug">Slug *</label>
+          <input id="project-slug" type="text" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} placeholder="production-backend" aria-invalid={Boolean(slug) && !slugPattern.test(slug)} className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 font-mono text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-[#0984e3]/50 focus:outline-none focus:ring-2 focus:ring-[#0984e3]/20" />
+          <p className="mt-1 text-[11px] text-zinc-600">Kleinbuchstaben, Zahlen und Bindestriche; innerhalb der Organisation eindeutig.</p>
+          {slug && !slugPattern.test(slug) ? <p role="alert" className="mt-1 text-xs text-red-300">Der Slug darf nur Kleinbuchstaben, Zahlen und Bindestriche enthalten.</p> : null}
         </div>
 
         <div>
@@ -173,21 +180,10 @@ export default function NewProjectPage() {
             className="mb-1.5 block text-sm font-medium text-zinc-300"
             htmlFor="project-team"
           >
-            Team <span className="font-normal text-zinc-600">(optional)</span>
+            Zugriff
           </label>
-          <select
-            className="h-9 w-full rounded-lg border border-white/[0.08] bg-[#1e272e] px-3 text-sm text-zinc-200 focus:border-[#0984e3]/50 focus:outline-none focus:ring-2 focus:ring-[#0984e3]/20"
-            id="project-team"
-            value={teamId}
-            onChange={(event) => setTeamId(event.target.value)}
-          >
-            <option value="">Keinem Team zuordnen</option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex gap-4 text-sm text-zinc-300"><label><input type="radio" checked={accessMode === "organization"} onChange={() => setAccessMode("organization")} /> Ganze Organisation</label><label><input type="radio" checked={accessMode === "team"} onChange={() => setAccessMode("team")} /> Ausgewählte Teams</label></div>
+          {accessMode === "team" ? <div className="mt-3 space-y-2 rounded-lg border border-white/[0.08] p-3">{teams.map((team) => <label key={team.id} className="flex items-center gap-2 text-sm text-zinc-300"><input type="checkbox" checked={teamIds.includes(team.id)} onChange={(event) => setTeamIds((current) => event.target.checked ? [...current, team.id] : current.filter((id) => id !== team.id))} />{team.name}</label>)}{!teams.length ? <p className="text-sm text-zinc-500">Für Team-Zugriff muss zuerst ein Team angelegt werden.</p> : null}</div> : null}
         </div>
 
         <div>
@@ -256,7 +252,7 @@ export default function NewProjectPage() {
         </Button>
         <Button
           onClick={() => create.mutate()}
-          disabled={!name || !slugPattern.test(name) || create.isPending}
+          disabled={!name.trim() || !slugPattern.test(slug) || (accessMode === "team" && !teamIds.length) || create.isPending}
           className="gap-2"
         >
           {create.isPending ? "Erstelle …" : "Projekt erstellen"}

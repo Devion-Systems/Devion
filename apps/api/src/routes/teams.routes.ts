@@ -1,4 +1,4 @@
-import { auditLogs, db, member, organization, projects, team, teamMember, user } from "@repo/db";
+import { auditLogs, db, member, projectTeams, projects, team, teamMember, user } from "@repo/db";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -189,37 +189,32 @@ routes.delete("/:orgSlug/teams/:teamId/members/:userId", async (c) => {
 routes.put("/:orgSlug/teams/:teamId/projects/:projectId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
+  if (!can(scope, "projects.manage_access")) return c.json({ error: "Permission required: projects.manage_access" }, 403);
   const item = await scopedTeam(scope.org.id, c.req.param("teamId"));
   if (!item) return c.json({ error: "Team not found" }, 404);
-  const result = await db
-    .update(projects)
-    .set({ teamId: item.id })
-    .where(
-      and(eq(projects.id, c.req.param("projectId")), eq(projects.organizationId, scope.org.id)),
-    )
-    .returning({ id: projects.id, teamId: projects.teamId });
+  const project = await db.query.projects.findFirst({ where: and(eq(projects.id, c.req.param("projectId")), eq(projects.organizationId, scope.org.id)) });
+  if (!project) return c.json({ error: "Project not found" }, 404);
+  await db.transaction(async (tx) => {
+    await tx.update(projects).set({ teamId: project.teamId ?? item.id, accessMode: "team" }).where(eq(projects.id, project.id));
+    await tx.insert(projectTeams).values({ projectId: project.id, teamId: item.id, assignedByUserId: scope.userId }).onConflictDoNothing();
+    await tx.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: scope.userId, action: "project.team_added", targetType: "project", targetId: project.id, metadata: JSON.stringify({ teamId: item.id }) });
+  });
+  const result = [{ id: project.id, teamId: project.teamId ?? item.id }];
   return result[0] ? c.json(result[0]) : c.json({ error: "Project not found" }, 404);
 });
 routes.delete("/:orgSlug/teams/:teamId/projects/:projectId", async (c) => {
   const scope = await access(c.req.raw, c.req.param("orgSlug"));
   if (!scope) return c.json({ error: "Not found" }, 404);
-  if (!can(scope, "teams.update")) return c.json({ error: "Permission required: teams.update" }, 403);
+  if (!can(scope, "projects.manage_access")) return c.json({ error: "Permission required: projects.manage_access" }, 403);
   const item = await scopedTeam(scope.org.id, c.req.param("teamId"));
   if (!item) return c.json({ error: "Team not found" }, 404);
-  const result = await db
-    .update(projects)
-    .set({ teamId: null })
-    .where(
-      and(
-        eq(projects.id, c.req.param("projectId")),
-        eq(projects.organizationId, scope.org.id),
-        eq(projects.teamId, item.id),
-      ),
-    )
-    .returning({ id: projects.id });
-  return result[0]
-    ? c.body(null, 204)
-    : c.json({ error: "Project not assigned to this team" }, 404);
+  const project = await db.query.projects.findFirst({ where: and(eq(projects.id, c.req.param("projectId")), eq(projects.organizationId, scope.org.id)) });
+  if (!project) return c.json({ error: "Project not found" }, 404);
+  const [removed] = await db.delete(projectTeams).where(and(eq(projectTeams.projectId, project.id), eq(projectTeams.teamId, item.id))).returning({ projectId: projectTeams.projectId });
+  if (!removed) return c.json({ error: "Project not assigned to this team" }, 404);
+  const remaining = await db.select({ teamId: projectTeams.teamId }).from(projectTeams).where(eq(projectTeams.projectId, project.id));
+  await db.update(projects).set({ teamId: remaining[0]?.teamId ?? null, accessMode: remaining.length ? "team" : "organization" }).where(eq(projects.id, project.id));
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: scope.userId, action: "project.team_removed", targetType: "project", targetId: project.id, metadata: JSON.stringify({ teamId: item.id }) });
+  return c.body(null, 204);
 });
 export { routes as teamRoutes };

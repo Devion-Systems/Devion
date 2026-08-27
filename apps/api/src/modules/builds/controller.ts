@@ -57,7 +57,7 @@ export async function reconcileBuild(buildId: string): Promise<void> {
       createdBy: build.triggeredBy,
     });
     await tx.insert(applicationDeployments).values({ id: crypto.randomUUID(), applicationId: build.applicationId, actorId: build.triggeredBy, action: "deploy", status: "succeeded", message: `Deployment ${deploymentId} created from build ${build.id}` });
-    await tx.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: build.triggeredBy, action: "deployment.created_from_build", targetType: "deployment", targetId: deploymentId, metadata: JSON.stringify({ buildId: build.id, commitSha }) });
+    await tx.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: build.triggeredBy, action: "deployment.created_from_build", targetType: "deployment", targetId: deploymentId, metadata: JSON.stringify({ projectId: build.projectId, buildId: build.id, commitSha }) });
   });
   if (deploymentId) await reconcileDeployment(deploymentId);
 }

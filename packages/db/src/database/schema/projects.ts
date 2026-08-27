@@ -10,7 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization, team, user } from "./auth.js";
 
-/** Projects are always scoped to an organization and can optionally belong to a team. */
+/** Projects are always scoped to exactly one organization. */
 export const projects = pgTable(
   "projects",
   {
@@ -18,6 +18,9 @@ export const projects = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
+    // Legacy single-team assignment. New access rules use projectTeams; retain
+    // this column during the compatibility migration so existing installs keep
+    // their assignments until they have been copied.
     teamId: text("team_id").references(() => team.id, { onDelete: "set null" }),
     createdByUserId: text("created_by_user_id")
       .notNull()
@@ -30,9 +33,16 @@ export const projects = pgTable(
     branch: text("branch").default("main").notNull(),
     // Set only by the deployment runtime; never accept this from dashboard users.
     routingTargetUrl: text("routing_target_url"),
-    status: text("status", { enum: ["healthy", "degraded", "failing", "idle"] })
-      .default("idle")
+    status: text("status", { enum: ["active", "archived"] })
+      .default("active")
       .notNull(),
+    accessMode: text("access_mode", { enum: ["organization", "team"] })
+      .default("organization")
+      .notNull(),
+    archivedAt: timestamp("archived_at"),
+    // Kept without a database FK to avoid a circular projects ↔ environments
+    // constraint. The API validates it belongs to this project.
+    defaultEnvironmentId: text("default_environment_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -43,6 +53,28 @@ export const projects = pgTable(
     uniqueIndex("projects_organization_slug_uidx").on(table.organizationId, table.slug),
     index("projects_organization_idx").on(table.organizationId),
     index("projects_team_idx").on(table.teamId),
+  ],
+);
+
+/** Multiple teams may be granted access to a team-scoped project. */
+export const projectTeams = pgTable(
+  "project_teams",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => team.id, { onDelete: "cascade" }),
+    assignedByUserId: text("assigned_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("project_teams_project_team_uidx").on(table.projectId, table.teamId),
+    index("project_teams_project_idx").on(table.projectId),
+    index("project_teams_team_idx").on(table.teamId),
   ],
 );
 
@@ -213,7 +245,9 @@ export const projectEnvironments = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    slug: text("slug").notNull(),
     displayName: text("display_name").notNull(),
+    protected: boolean("protected").default(false).notNull(),
     branch: text("branch").default("main").notNull(),
     autoDeployEnabled: boolean("auto_deploy_enabled").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -223,7 +257,7 @@ export const projectEnvironments = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("project_environments_project_name_uidx").on(table.projectId, table.name),
+    uniqueIndex("project_environments_project_slug_uidx").on(table.projectId, table.slug),
     index("project_environments_organization_idx").on(table.organizationId),
     index("project_environments_project_idx").on(table.projectId),
   ],

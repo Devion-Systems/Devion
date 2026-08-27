@@ -82,7 +82,7 @@ export default function ApplicationsPage() {
     queryFn: async () => {
       const response = await fetch(api(`/organizations/${orgSlug}/projects`), { credentials: "include" });
       if (!response.ok) throw new Error("Projekte konnten nicht geladen werden");
-      return response.json();
+      return (await response.json()).items as Project[];
     },
   });
   const applications = useQuery<Application[]>({

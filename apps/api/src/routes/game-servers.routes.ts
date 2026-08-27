@@ -8,7 +8,6 @@ import {
   gameServers,
   member,
   organization,
-  projects,
   team,
   teamMember,
   user,
@@ -20,6 +19,7 @@ import { z } from "zod";
 import { auth } from "../features/auth/config.js";
 import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
+import { listAccessibleProjects, resolveProjectAccess } from "../features/projects/access.js";
 import {
   reconcileDeployment,
   stopApplicationWorkloads,
@@ -135,14 +135,18 @@ async function hasServerRole(
 routes.get("/:orgSlug/game-servers", async (c) => {
   const access = await scope(c.req.raw, c.req.param("orgSlug"));
   if (!access) return c.json({ error: "Not found" }, 404);
+  const projectAccess = await listAccessibleProjects(c.req.raw, c.req.param("orgSlug"));
+  if (!projectAccess) return c.json({ error: "Not found" }, 404);
+  const projectIds = new Set(projectAccess.projects.map((project) => project.id));
   const servers = await db
     .select()
     .from(gameServers)
     .where(eq(gameServers.organizationId, access.org.id))
     .orderBy(asc(gameServers.name));
-  if (access.permissions.includes("applications.read")) return c.json(servers);
+  const scopedServers = servers.filter((server) => server.projectId && projectIds.has(server.projectId));
+  if (access.permissions.includes("applications.read")) return c.json(scopedServers);
   const permitted = await Promise.all(
-    servers.map(async (server) =>
+    scopedServers.map(async (server) =>
       (await hasServerRole(server.id, access, "viewer")) ? server : null,
     ),
   );
@@ -161,10 +165,10 @@ routes.post("/:orgSlug/game-servers", async (c) => {
       { error: "Invalid game server configuration", issues: parsed.error.flatten() },
       400,
     );
-  const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, parsed.data.projectId), eq(projects.organizationId, access.org.id)),
-  });
-  if (!project) return c.json({ error: "Project not found" }, 404);
+  const projectAccess = await resolveProjectAccess(c.req.raw, c.req.param("orgSlug"), parsed.data.projectId, "applications.create");
+  if (!projectAccess) return c.json({ error: "Project not found or access denied" }, 404);
+  const project = projectAccess.project;
+  if (project.status === "archived") return c.json({ error: "Archived projects cannot receive new game servers" }, 409);
   const serverId = crypto.randomUUID();
   const applicationId = crypto.randomUUID();
   const deploymentId = crypto.randomUUID();
