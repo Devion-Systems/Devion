@@ -25,6 +25,7 @@ import { ResourceStatusBadge } from "@/components/resources/resource-status-badg
 import { Button } from "@/components/ui/button";
 
 type Project = { id: string; name: string };
+type Environment = { id: string; displayName: string; name: string };
 type SourceType = "git" | "docker";
 type Application = {
   id: string;
@@ -35,6 +36,8 @@ type Application = {
   gitUrl: string | null;
   imageName: string | null;
   status: string;
+  lifecycleStatus: "active" | "archived";
+  applicationType: "web" | "api" | "worker" | "game_server" | "custom";
   branch: string;
   projectId: string;
   projectName: string;
@@ -62,11 +65,17 @@ export default function ApplicationsPage() {
   const { orgSlug } = useParams<{ orgSlug: string }>();
   const client = useQueryClient();
   const [search, setSearch] = useState("");
+  const [filterProjectId, setFilterProjectId] = useState("");
+  const [filterSourceType, setFilterSourceType] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterType, setFilterType] = useState("");
   const [creating, setCreating] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [sourceType, setSourceType] = useState<SourceType>("git");
+  const [applicationType, setApplicationType] = useState<Application["applicationType"]>("custom");
+  const [defaultEnvironmentId, setDefaultEnvironmentId] = useState("");
   const [gitUrl, setGitUrl] = useState("");
   const [imageName, setImageName] = useState("");
   const [branch, setBranch] = useState("main");
@@ -86,10 +95,33 @@ export default function ApplicationsPage() {
     },
   });
   const applications = useQuery<Application[]>({
-    queryKey: ["org", orgSlug, "applications"],
+    queryKey: ["org", orgSlug, "applications", search, filterProjectId, filterSourceType, filterStatus, filterType],
     queryFn: async () => {
-      const response = await fetch(api(`/organizations/${orgSlug}/applications`), { credentials: "include" });
+      const query = new URLSearchParams();
+      if (search) query.set("search", search);
+      if (filterProjectId) query.set("projectId", filterProjectId);
+      if (filterSourceType) query.set("sourceType", filterSourceType);
+      if (filterStatus) query.set("status", filterStatus);
+      if (filterType) query.set("type", filterType);
+      const response = await fetch(api(`/organizations/${orgSlug}/applications${query.size ? `?${query}` : ""}`), { credentials: "include" });
       if (!response.ok) throw new Error("Anwendungen konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const environments = useQuery<Environment[]>({
+    enabled: Boolean(projectId),
+    queryKey: ["org", orgSlug, "project", projectId, "environments"],
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${projectId}/environments`), { credentials: "include" });
+      if (!response.ok) throw new Error("Umgebungen konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const context = useQuery<{ permissions: string[] }>({
+    queryKey: ["org", orgSlug, "context"],
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}`), { credentials: "include" });
+      if (!response.ok) throw new Error("Berechtigungen konnten nicht geladen werden");
       return response.json();
     },
   });
@@ -102,6 +134,8 @@ export default function ApplicationsPage() {
     setImageName("");
     setBranch("main");
     setSourceType("git");
+    setApplicationType("custom");
+    setDefaultEnvironmentId("");
   };
 
   const create = useMutation({
@@ -115,6 +149,8 @@ export default function ApplicationsPage() {
           slug: slugify(name),
           description: description || undefined,
           sourceType,
+          applicationType,
+          defaultEnvironmentId: defaultEnvironmentId || undefined,
           gitUrl: sourceType === "git" ? gitUrl : undefined,
           imageName: sourceType === "docker" ? imageName : undefined,
           branch,
@@ -133,9 +169,13 @@ export default function ApplicationsPage() {
   });
   const remove = useMutation({
     mutationFn: async (application: Application) => {
+      const name = prompt(`Gib zur Bestätigung exakt "${application.name}" ein.`);
+      if (name === null) return;
       const response = await fetch(api(`/organizations/${orgSlug}/projects/${application.projectId}/applications/${application.id}`), {
         method: "DELETE",
         credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
@@ -154,6 +194,13 @@ export default function ApplicationsPage() {
         const body = await response.json().catch(() => null);
         throw new Error(body?.error ?? "Runtime-Aktion fehlgeschlagen");
       }
+    },
+    onSuccess: refresh,
+  });
+  const lifecycle = useMutation({
+    mutationFn: async ({ application, action }: { application: Application; action: "archive" | "restore" }) => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${application.projectId}/applications/${application.id}/${action}`), { method: "POST", credentials: "include" });
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? "Application-Status konnte nicht geändert werden");
     },
     onSuccess: refresh,
   });
@@ -231,13 +278,17 @@ export default function ApplicationsPage() {
   }
 
   function applicationActions(application: Application) {
+    if (application.lifecycleStatus === "archived") {
+      return context.data?.permissions.includes("applications.archive") ? <Button type="button" size="sm" variant="outline" onClick={() => lifecycle.mutate({ application, action: "restore" })} disabled={lifecycle.isPending}><RotateCcw className="size-3.5" />Wiederherstellen</Button> : null;
+    }
+    const archiveButton = context.data?.permissions.includes("applications.archive") ? <Button type="button" size="sm" variant="ghost" onClick={() => lifecycle.mutate({ application, action: "archive" })} disabled={lifecycle.isPending} aria-label={`${application.name} archivieren`}>Archivieren</Button> : null;
     if (application.sourceType !== "docker") {
-      return <Button type="button" size="sm" onClick={() => setBuildApplication(application)}><Play className="size-3.5" />Deploy</Button>;
+      return <><Button type="button" size="sm" onClick={() => setBuildApplication(application)}><Play className="size-3.5" />Deploy</Button>{archiveButton}</>;
     }
 
     const active = isActive(application);
     return (
-      <Button
+      <><Button
         type="button"
         size="sm"
         variant={active ? "outline" : "default"}
@@ -247,7 +298,7 @@ export default function ApplicationsPage() {
       >
         {active ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
         {runtimeAction.isPending ? "Wird ausgeführt …" : active ? "Stoppen" : "Starten"}
-      </Button>
+      </Button>{archiveButton}</>
     );
   }
 
@@ -281,7 +332,7 @@ export default function ApplicationsPage() {
           ) : (
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <label className="text-sm text-zinc-300">Projekt
-                <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className={inputClassName} disabled={projects.isLoading}>
+                <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setDefaultEnvironmentId(""); }} className={inputClassName} disabled={projects.isLoading}>
                   <option value="">{projects.isLoading ? "Projekte werden geladen …" : "Projekt auswählen"}</option>
                   {(projects.data ?? []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                 </select>
@@ -293,6 +344,17 @@ export default function ApplicationsPage() {
                 <select value={sourceType} onChange={(event) => setSourceType(event.target.value as SourceType)} className={inputClassName}>
                   <option value="git">Git-Repository</option>
                   <option value="docker">Docker-Image</option>
+                </select>
+              </label>
+              <label className="text-sm text-zinc-300">Application Type
+                <select value={applicationType} onChange={(event) => setApplicationType(event.target.value as Application["applicationType"])} className={inputClassName}>
+                  <option value="custom">Custom</option><option value="web">Web</option><option value="api">API</option><option value="worker">Worker</option><option value="game_server">Game Server</option>
+                </select>
+              </label>
+              <label className="text-sm text-zinc-300">Environment <span className="text-zinc-600">(optional)</span>
+                <select value={defaultEnvironmentId} onChange={(event) => setDefaultEnvironmentId(event.target.value)} className={inputClassName} disabled={!projectId || environments.isLoading}>
+                  <option value="">{projectId ? "Keine Default-Environment" : "Zuerst Projekt auswählen"}</option>
+                  {(environments.data ?? []).map((environment) => <option key={environment.id} value={environment.id}>{environment.displayName || environment.name}</option>)}
                 </select>
               </label>
               <label className="text-sm text-zinc-300">{sourceType === "git" ? "Repository-URL" : "Image-Name"}
@@ -332,9 +394,15 @@ export default function ApplicationsPage() {
             <h2 className="font-medium text-zinc-100">Workloads</h2>
             <p className="mt-1 text-sm text-zinc-500">Status prüfen und Laufzeitaktionen direkt ausführen.</p>
           </div>
-          <div className="relative w-full sm:w-72">
+          <div className="flex w-full flex-wrap gap-2 lg:w-auto">
+          <div className="relative min-w-52 flex-1 sm:w-72">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Workloads suchen …" className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] pl-9 pr-3 text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#81ecec]/70 focus:ring-2 focus:ring-[#81ecec]/20" />
+          </div>
+          <select value={filterProjectId} onChange={(event) => setFilterProjectId(event.target.value)} aria-label="Projekt filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Projekte</option>{(projects.data ?? []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+          <select value={filterSourceType} onChange={(event) => setFilterSourceType(event.target.value)} aria-label="Quelle filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Quellen</option><option value="git">Git</option><option value="docker">Image</option></select>
+          <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)} aria-label="Status filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Stati</option><option value="active">Aktiv</option><option value="archived">Archiviert</option></select>
+          <select value={filterType} onChange={(event) => setFilterType(event.target.value)} aria-label="Typ filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Typen</option><option value="web">Web</option><option value="api">API</option><option value="worker">Worker</option><option value="game_server">Game Server</option><option value="custom">Custom</option></select>
           </div>
         </div>
 
@@ -371,7 +439,7 @@ export default function ApplicationsPage() {
                   {visible.map((application) => (
                     <tr key={application.id} className="transition-colors hover:bg-white/[0.025]">
                       <td className="max-w-64 px-5 py-4">
-                        <p className="truncate font-medium text-zinc-100">{application.name}</p>
+                         <Link href={`/${orgSlug}/applications/${application.id}`} className="block truncate font-medium text-zinc-100 hover:text-[#81ecec]">{application.name}</Link>
                         <p className="mt-1 truncate text-xs text-[#81ecec]">{application.projectName}</p>
                         <p className="mt-1 truncate text-xs text-zinc-600">{application.description ?? "Keine Beschreibung"}</p>
                       </td>
@@ -380,7 +448,7 @@ export default function ApplicationsPage() {
                         <p title={sourceLabel(application)} className="mt-1 truncate font-mono text-xs text-zinc-600">{sourceLabel(application)}</p>
                         <p className="mt-1 inline-flex items-center gap-1 text-xs text-zinc-600"><GitBranch className="size-3" />{application.branch}</p>
                       </td>
-                      <td className="px-4 py-4"><ResourceStatusBadge status={application.status === "draft" ? "idle" : application.status} /></td>
+                       <td className="px-4 py-4"><ResourceStatusBadge status={application.lifecycleStatus === "archived" ? "stopped" : application.status === "draft" ? "idle" : application.status} /></td>
                       <td className="px-4 py-4 text-xs text-zinc-500">{dateTime.format(new Date(application.updatedAt))}</td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-1.5">
@@ -400,10 +468,10 @@ export default function ApplicationsPage() {
                 <article key={application.id} className="p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-zinc-100">{application.name}</p>
+                       <Link href={`/${orgSlug}/applications/${application.id}`} className="block truncate font-medium text-zinc-100 hover:text-[#81ecec]">{application.name}</Link>
                       <p className="mt-1 truncate text-xs text-[#81ecec]">{application.projectName}</p>
                     </div>
-                    <ResourceStatusBadge status={application.status === "draft" ? "idle" : application.status} />
+                     <ResourceStatusBadge status={application.lifecycleStatus === "archived" ? "stopped" : application.status === "draft" ? "idle" : application.status} />
                   </div>
                   <p className="mt-3 truncate text-sm text-zinc-500">{application.description ?? "Keine Beschreibung"}</p>
                   <div className="mt-4 flex min-w-0 items-center gap-3 text-xs text-zinc-500">

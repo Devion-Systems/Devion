@@ -5,6 +5,7 @@ import {
   applications,
   db,
   deployments,
+  environmentVariables,
   gameServers,
   member,
   nodeRegistrationTokens,
@@ -12,13 +13,14 @@ import {
   organization,
   workloads,
 } from "@repo/db";
-import { and, eq, gt, isNull, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
 import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import { resolveOrganizationAccess } from "../middleware/organization-policy.js";
+import { decryptEnvironmentValue } from "../features/environments/crypto.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
@@ -350,6 +352,42 @@ routes.get("/api/agents/commands", async (c) => {
     })),
   );
 });
+const workloadTelemetryInput = z.object({ reports: z.array(z.object({ workloadId: z.string().uuid(), actualState: z.enum(["running", "stopped", "failed", "unknown"]), healthStatus: z.enum(["none", "starting", "healthy", "unhealthy"]) })).max(500) });
+
+/** Delivers decrypted secrets only to the agent assigned to this workload. They are never copied into commands or deployment records. */
+routes.get("/api/agents/workloads/:workloadId/secrets", async (c) => {
+  const node = await agentIdentity(c.req.raw);
+  if (!node) return c.json({ error: "Agent authentication required" }, 401);
+  const workload = await db.query.workloads.findFirst({ where: and(eq(workloads.id, c.req.param("workloadId")), eq(workloads.nodeId, node.id)) });
+  if (!workload) return c.json({ error: "Workload not found" }, 404);
+  const deployment = await db.query.deployments.findFirst({ where: eq(deployments.id, workload.deploymentId) });
+  if (!deployment) return c.json({ error: "Deployment not found" }, 404);
+  const application = await db.query.applications.findFirst({ where: eq(applications.id, deployment.applicationId) });
+  if (!application) return c.json({ error: "Application not found" }, 404);
+  const snapshot = deployment.configurationSnapshot as { environmentId?: unknown; secretReferences?: unknown } | null;
+  const environmentId = typeof snapshot?.environmentId === "string" ? snapshot.environmentId : null;
+  const references = z.array(z.object({ targetKey: z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/), secretEnvironmentVariableId: z.string().uuid() })).safeParse(snapshot?.secretReferences ?? []);
+  if (!environmentId || !references.success || references.data.length === 0) return c.json({ environment: {} });
+  const values = await db.select({ id: environmentVariables.id, valueEncrypted: environmentVariables.valueEncrypted }).from(environmentVariables).where(and(inArray(environmentVariables.id, references.data.map((reference) => reference.secretEnvironmentVariableId)), eq(environmentVariables.environmentId, environmentId), eq(environmentVariables.isSecret, true)));
+  const encryptedById = new Map(values.map((value) => [value.id, value.valueEncrypted]));
+  const environment = Object.fromEntries(await Promise.all(references.data.filter((reference) => encryptedById.has(reference.secretEnvironmentVariableId)).map(async (reference) => [reference.targetKey, await decryptEnvironmentValue(encryptedById.get(reference.secretEnvironmentVariableId)!) ] as const)));
+  return c.json({ environment });
+});
+
+routes.get("/api/agents/workloads", async (c) => {
+  const node = await agentIdentity(c.req.raw);
+  if (!node) return c.json({ error: "Agent authentication required" }, 401);
+  return c.json(await db.select({ workloadId: workloads.id }).from(workloads).where(and(eq(workloads.nodeId, node.id), eq(workloads.desiredState, "running"))));
+});
+
+routes.post("/api/agents/workloads/telemetry", async (c) => {
+  const node = await agentIdentity(c.req.raw);
+  if (!node) return c.json({ error: "Agent authentication required" }, 401);
+  const parsed = workloadTelemetryInput.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Invalid workload telemetry", issues: parsed.error.flatten() }, 400);
+  await Promise.all(parsed.data.reports.map((report) => db.update(workloads).set({ actualState: report.actualState, healthStatus: report.healthStatus, healthMessage: null, lastReportedAt: new Date() }).where(and(eq(workloads.id, report.workloadId), eq(workloads.nodeId, node.id)))));
+  return c.json({ accepted: parsed.data.reports.length });
+});
 
 routes.post("/api/agents/commands/results", async (c) => {
   const node = await agentIdentity(c.req.raw);
@@ -383,6 +421,7 @@ routes.post("/api/agents/commands/results", async (c) => {
       .set({
         actualState: result.status === "succeeded" ? "running" : "failed",
         ...(runtime.success ? { runtimeId: runtime.data.runtimeId } : {}),
+        ...(runtime.success && runtime.data.ports ? { publishedPorts: runtime.data.ports } : {}),
         lastReportedAt: new Date(),
       })
       .where(and(eq(workloads.id, command.resourceId), eq(workloads.nodeId, node.id)));

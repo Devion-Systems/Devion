@@ -1,4 +1,4 @@
-import { applications, auditLogs, builds, db, deployments } from "@repo/db";
+import { applicationEnvironmentVariables, applicationPorts, applicationResourceConfigurations, applicationRuntimeConfigurations, applicationSecretAttachments, applicationVolumeMounts, applications, auditLogs, builds, db, deployments, environmentVariables } from "@repo/db";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { isIP } from "node:net";
@@ -6,16 +6,17 @@ import { z } from "zod";
 import { createBuilderRun, cancelBuilderRun, getBuilderLogs } from "../features/builds/builder-client.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import { resolveProjectAccess } from "../features/projects/access.js";
+import { decryptEnvironmentValue } from "../features/environments/crypto.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
 routes.use("/*", requireAuthenticatedUser);
 const triggerInput = z.object({
   deploy: z.boolean().default(true),
-  replicas: z.number().int().min(1).max(100).default(1),
-  cpuMilli: z.number().int().min(1).max(256_000).default(250),
-  memoryMib: z.number().int().min(16).max(1_048_576).default(256),
-  storageMib: z.number().int().min(0).max(1_048_576).default(0),
+  replicas: z.number().int().min(1).max(100).optional(),
+  cpuMilli: z.number().int().min(1).max(256_000).optional(),
+  memoryMib: z.number().int().min(16).max(1_048_576).optional(),
+  storageMib: z.number().int().min(0).max(1_048_576).optional(),
 });
 
 async function scope(request: Request, orgSlug: string, projectId: string) {
@@ -42,6 +43,19 @@ async function createBuild(input: { app: typeof applications.$inferSelect; organ
   const buildId = crypto.randomUUID();
   const imageRepository = `${prefix}/${input.organizationId}/${input.projectId}/${input.app.id}`.toLowerCase();
   const imageTag = buildId;
+  const [runtimeDefaults, resourceDefaults, ports, volumes, applicationVariables, secretAttachments] = await Promise.all([
+    db.query.applicationRuntimeConfigurations.findFirst({ where: eq(applicationRuntimeConfigurations.applicationId, input.app.id) }),
+    db.query.applicationResourceConfigurations.findFirst({ where: eq(applicationResourceConfigurations.applicationId, input.app.id) }),
+    db.select().from(applicationPorts).where(eq(applicationPorts.applicationId, input.app.id)),
+    db.select().from(applicationVolumeMounts).where(eq(applicationVolumeMounts.applicationId, input.app.id)),
+    db.select().from(applicationEnvironmentVariables).where(eq(applicationEnvironmentVariables.applicationId, input.app.id)),
+    input.app.defaultEnvironmentId ? db.select({ id: applicationSecretAttachments.id, targetKey: applicationSecretAttachments.targetKey, secretEnvironmentVariableId: applicationSecretAttachments.secretEnvironmentVariableId }).from(applicationSecretAttachments).where(and(eq(applicationSecretAttachments.applicationId, input.app.id), eq(applicationSecretAttachments.environmentId, input.app.defaultEnvironmentId))) : Promise.resolve([]),
+  ]);
+  const environmentValues = input.app.defaultEnvironmentId ? await db.select().from(environmentVariables).where(and(eq(environmentVariables.environmentId, input.app.defaultEnvironmentId), eq(environmentVariables.isSecret, false))) : [];
+  const environment = Object.fromEntries(await Promise.all(environmentValues.map(async (variable) => [variable.key, await decryptEnvironmentValue(variable.valueEncrypted)] as const)));
+  for (const variable of applicationVariables.filter((value) => value.environmentId === null || value.environmentId === input.app.defaultEnvironmentId)) environment[variable.key] = await decryptEnvironmentValue(variable.valueEncrypted);
+  const requirements = { cpuMilli: input.deployment.cpuMilli ?? resourceDefaults?.cpuMilli ?? 250, memoryMib: input.deployment.memoryMib ?? resourceDefaults?.memoryMib ?? 256, storageMib: input.deployment.storageMib ?? resourceDefaults?.storageMib ?? 0, runtime: "container" as const };
+  const replicas = input.deployment.replicas ?? runtimeDefaults?.replicas ?? 1;
   const configured = input.app.buildConfiguration as { dockerfile?: string; context?: string; target?: string; args?: Record<string, string> };
   const buildConfiguration = {
     strategy: "dockerfile",
@@ -49,8 +63,10 @@ async function createBuild(input: { app: typeof applications.$inferSelect; organ
     context: configured.context ?? input.app.rootDirectory,
     ...(configured.target ? { target: configured.target } : {}),
     args: configured.args ?? {},
-    deployment: { enabled: input.trigger !== "build", replicas: input.deployment.replicas },
-    requirements: { cpuMilli: input.deployment.cpuMilli, memoryMib: input.deployment.memoryMib, storageMib: input.deployment.storageMib, runtime: "container" },
+    deployment: { enabled: input.trigger !== "build", replicas },
+    requirements,
+    runtimeConfig: { environment, ports: (ports.length ? ports : [{ internalPort: input.app.internalPort, protocol: "tcp", exposure: "private" }]).map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure })), volumes: volumes.map((volume) => ({ name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })), restartPolicy: runtimeDefaults?.restartPolicy ?? "unless-stopped", gracefulShutdownSeconds: runtimeDefaults?.gracefulShutdownSeconds ?? 15, ...(runtimeDefaults?.command ? { command: runtimeDefaults.command } : {}), ...(runtimeDefaults?.workingDirectory ? { workingDirectory: runtimeDefaults.workingDirectory } : {}), ...(runtimeDefaults?.healthcheckCommand ? { healthCheck: { command: runtimeDefaults.healthcheckCommand, intervalSeconds: runtimeDefaults.healthcheckIntervalSeconds, timeoutSeconds: runtimeDefaults.healthcheckTimeoutSeconds, retries: runtimeDefaults.healthcheckRetries, startPeriodSeconds: runtimeDefaults.healthcheckStartPeriodSeconds } } : {}) },
+    configurationSnapshot: { source: { type: "git", repository: repositoryUrl, branch: input.app.branch }, build: { strategy: "dockerfile", dockerfile: configured.dockerfile ?? null, context: configured.context ?? input.app.rootDirectory }, runtime: runtimeDefaults ?? { runtime: "container", replicas, restartPolicy: "unless-stopped", gracefulShutdownSeconds: 15 }, resources: requirements, ports, volumes, environmentId: input.app.defaultEnvironmentId ?? null, environmentKeys: Object.keys(environment), applicationVariableKeys: applicationVariables.map((variable) => ({ key: variable.key, environmentId: variable.environmentId })), secretReferences: secretAttachments },
   };
   await db.insert(builds).values({ id: buildId, organizationId: input.organizationId, projectId: input.projectId, applicationId: input.app.id, triggeredBy: input.userId, trigger: input.trigger, retryOfBuildId: input.retryOfBuildId, repositoryUrl, repositoryProvider: input.app.repositoryProvider, branch: input.app.branch, buildConfiguration, imageRepository, imageTag });
   try {
@@ -71,8 +87,10 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/builds", 
   if (access.project.status === "archived") return c.json({ error: "Archived projects cannot start builds" }, 409);
   const app = await db.query.applications.findFirst({ where: and(eq(applications.id, c.req.param("applicationId")), eq(applications.projectId, access.project.id)) });
   if (!app) return c.json({ error: "Application not found" }, 404);
+  if (app.lifecycleStatus === "archived") return c.json({ error: "Archived applications cannot start builds" }, 409);
   if (app.sourceType !== "git") return c.json({ error: "Builds are available only for Git applications" }, 409);
   const parsed = triggerInput.safeParse(await c.req.json().catch(() => ({}))); if (!parsed.success) return c.json({ error: "Invalid build settings" }, 400);
+  if (parsed.data.deploy && !access.permissions.includes("deployments.create")) return c.json({ error: "Permission required: deployments.create" }, 403);
   try { const buildId = await createBuild({ app, organizationId: access.org.id, projectId: access.project.id, userId: access.userId, trigger: parsed.data.deploy ? "deploy" : "build", deployment: parsed.data }); return c.json({ buildId, status: "queued" }, 202); }
   catch (error) { return c.json({ error: error instanceof Error ? error.message : "Build could not be queued" }, 503); }
 });
@@ -115,7 +133,7 @@ routes.post("/:orgSlug/projects/:projectId/builds/:buildId/retry", async (c) => 
   if (!access.permissions.includes("builds.create")) return c.json({ error: "Permission required: builds.create" }, 403);
   if (access.project.status === "archived") return c.json({ error: "Archived projects cannot start builds" }, 409);
   const previous = await db.query.builds.findFirst({ where: and(eq(builds.id, c.req.param("buildId")), eq(builds.projectId, access.project.id)) }); if (!previous || !["failed", "cancelled"].includes(previous.status)) return c.json({ error: "Only failed or cancelled builds can be retried" }, 409);
-  const app = await db.query.applications.findFirst({ where: eq(applications.id, previous.applicationId) }); if (!app) return c.json({ error: "Application not found" }, 404);
+  const app = await db.query.applications.findFirst({ where: eq(applications.id, previous.applicationId) }); if (!app) return c.json({ error: "Application not found" }, 404); if (app.lifecycleStatus === "archived") return c.json({ error: "Archived applications cannot start builds" }, 409);
   const config = previous.buildConfiguration as { deployment?: { enabled?: boolean; replicas?: number }; requirements?: { cpuMilli?: number; memoryMib?: number; storageMib?: number } };
   const deployment = triggerInput.parse({ deploy: config.deployment?.enabled ?? (previous.trigger !== "build"), replicas: config.deployment?.replicas, ...config.requirements });
   try { const buildId = await createBuild({ app, organizationId: access.org.id, projectId: access.project.id, userId: access.userId, trigger: "retry", retryOfBuildId: previous.id, deployment }); return c.json({ buildId, status: "queued" }, 202); } catch (error) { return c.json({ error: error instanceof Error ? error.message : "Retry could not be queued" }, 503); }

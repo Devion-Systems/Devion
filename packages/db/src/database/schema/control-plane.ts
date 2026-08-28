@@ -113,6 +113,8 @@ export const deployments = pgTable(
     runtime: text("runtime", { enum: ["container", "microvm"] }).notNull(),
     requirements: jsonb("requirements").notNull(),
     runtimeConfig: jsonb("runtime_config").notNull().default({}),
+    /** Immutable effective configuration used to create this deployment. */
+    configurationSnapshot: jsonb("configuration_snapshot"),
     buildId: text("build_id").references(() => builds.id, { onDelete: "restrict" }),
     commitSha: text("commit_sha"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
@@ -134,6 +136,7 @@ export const workloads = pgTable(
       .references(() => deployments.id, { onDelete: "cascade" }),
     nodeId: text("node_id").references(() => nodes.id, { onDelete: "set null" }),
     runtimeId: text("runtime_id"),
+    publishedPorts: jsonb("published_ports").$type<Record<string, number>>().notNull().default({}),
     schedulingReasons: jsonb("scheduling_reasons").$type<string[]>().notNull().default([]),
     desiredState: text("desired_state", { enum: ["running", "stopped", "deleted"] }).notNull(),
     actualState: text("actual_state", {
@@ -141,6 +144,10 @@ export const workloads = pgTable(
     })
       .notNull()
       .default("pending"),
+    healthStatus: text("health_status", { enum: ["none", "starting", "healthy", "unhealthy"] })
+      .notNull()
+      .default("none"),
+    healthMessage: text("health_message"),
     restartCount: integer("restart_count").notNull().default(0),
     lastReportedAt: timestamp("last_reported_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

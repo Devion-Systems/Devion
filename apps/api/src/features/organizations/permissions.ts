@@ -29,6 +29,11 @@ export const permissionRegistry = [
   ["applications.create", "Anwendungen", "Anwendungen erstellen", "Anwendungen in Projekten erstellen."],
   ["applications.update", "Anwendungen", "Anwendungen ändern", "Anwendungen bereitstellen und stoppen."],
   ["applications.delete", "Anwendungen", "Anwendungen löschen", "Anwendungen löschen."],
+  ["applications.archive", "Anwendungen", "Anwendungen archivieren", "Anwendungen archivieren und wiederherstellen."],
+  ["deployments.create", "Deployments", "Deployments erstellen", "Application-Konfiguration als Deployment ausrollen."],
+  ["secrets.read_metadata", "Secrets", "Secret-Metadaten lesen", "Secret-Namen und Attachments ohne Werte anzeigen."],
+  ["secrets.attach", "Secrets", "Secrets anhängen", "Secrets an Applications anhängen oder entfernen."],
+  ["volumes.manage", "Volumes", "Volume-Mounts verwalten", "Application-Volume-Mounts verwalten."],
   ["builds.read", "Builds", "Builds lesen", "Builds und Logs anzeigen."],
   ["builds.create", "Builds", "Builds starten", "Builds und Deployments starten."],
   ["builds.cancel", "Builds", "Builds abbrechen", "Laufende Builds abbrechen."],
@@ -43,8 +48,8 @@ export const allPermissions = permissionRegistry.map(([key]) => key) as Permissi
 const systemPermissions: Record<string, readonly Permission[]> = {
   owner: allPermissions,
   admin: allPermissions.filter((permission) => !["organization.delete"].includes(permission)),
-  developer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "builds.read", "builds.create", "builds.cancel"],
-  member: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "builds.read", "builds.create", "builds.cancel"],
+  developer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "applications.archive", "deployments.create", "secrets.read_metadata", "secrets.attach", "volumes.manage", "builds.read", "builds.create", "builds.cancel"],
+  member: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "applications.archive", "deployments.create", "secrets.read_metadata", "secrets.attach", "volumes.manage", "builds.read", "builds.create", "builds.cancel"],
   viewer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "applications.read", "builds.read", "nodes.read", "audit.read"],
 };
 

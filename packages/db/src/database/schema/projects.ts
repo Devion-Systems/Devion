@@ -138,8 +138,19 @@ export const applications = pgTable(
     autoDeployEnabled: boolean("auto_deploy_enabled").default(false).notNull(),
     gitCredentialReference: text("git_credential_reference"),
     lastKnownCommit: text("last_known_commit"),
+    /** Lifecycle is deliberately separate from deployment/workload health. */
+    lifecycleStatus: text("lifecycle_status", { enum: ["active", "archived"] })
+      .default("active")
+      .notNull(),
+    archivedAt: timestamp("archived_at"),
+    applicationType: text("application_type", {
+      enum: ["web", "api", "worker", "game_server", "custom"],
+    }).default("custom").notNull(),
+    // Kept without an FK because environments already reference projects and a
+    // direct FK would make the project/environment relationship circular.
+    defaultEnvironmentId: text("default_environment_id"),
     status: text("status", {
-      enum: ["draft", "ready", "deploying", "healthy", "degraded", "failed", "stopped"],
+      enum: ["draft", "ready", "deploying", "healthy", "degraded", "failed", "stopped", "archived"],
     })
       .default("draft")
       .notNull(),
@@ -153,6 +164,123 @@ export const applications = pgTable(
     uniqueIndex("applications_project_slug_uidx").on(table.projectId, table.slug),
     index("applications_organization_idx").on(table.organizationId),
     index("applications_project_idx").on(table.projectId),
+  ],
+);
+
+/** Structured build defaults for Git applications. Build history snapshots these values. */
+export const applicationBuildConfigurations = pgTable(
+  "application_build_configurations",
+  {
+    applicationId: text("application_id").primaryKey().references(() => applications.id, { onDelete: "cascade" }),
+    buildMode: text("build_mode", { enum: ["auto", "dockerfile"] }).default("dockerfile").notNull(),
+    runtime: text("runtime").default("container").notNull(),
+    runtimeVersion: text("runtime_version"),
+    rootDirectory: text("root_directory").default(".").notNull(),
+    installCommand: text("install_command"),
+    buildCommand: text("build_command"),
+    startCommand: text("start_command"),
+    dockerfilePath: text("dockerfile_path"),
+    buildContext: text("build_context"),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+);
+
+/** Runtime defaults only contain options the current container agent can receive. */
+export const applicationRuntimeConfigurations = pgTable(
+  "application_runtime_configurations",
+  {
+    applicationId: text("application_id").primaryKey().references(() => applications.id, { onDelete: "cascade" }),
+    runtime: text("runtime", { enum: ["container"] }).default("container").notNull(),
+    command: text("command"),
+    workingDirectory: text("working_directory"),
+    restartPolicy: text("restart_policy", { enum: ["no", "on-failure", "always", "unless-stopped"] }).default("unless-stopped").notNull(),
+    gracefulShutdownSeconds: integer("graceful_shutdown_seconds").default(15).notNull(),
+    healthcheckCommand: text("healthcheck_command"),
+    healthcheckIntervalSeconds: integer("healthcheck_interval_seconds").default(30).notNull(),
+    healthcheckTimeoutSeconds: integer("healthcheck_timeout_seconds").default(5).notNull(),
+    healthcheckRetries: integer("healthcheck_retries").default(3).notNull(),
+    healthcheckStartPeriodSeconds: integer("healthcheck_start_period_seconds").default(0).notNull(),
+    replicas: integer("replicas").default(1).notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+);
+
+export const applicationResourceConfigurations = pgTable(
+  "application_resource_configurations",
+  {
+    applicationId: text("application_id").primaryKey().references(() => applications.id, { onDelete: "cascade" }),
+    cpuMilli: integer("cpu_milli").default(250).notNull(),
+    memoryMib: integer("memory_mib").default(256).notNull(),
+    storageMib: integer("storage_mib").default(0).notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+);
+
+export const applicationPorts = pgTable(
+  "application_ports",
+  {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    name: text("name"),
+    internalPort: integer("internal_port").notNull(),
+    protocol: text("protocol", { enum: ["tcp", "udp"] }).default("tcp").notNull(),
+    exposure: text("exposure", { enum: ["private", "public"] }).default("private").notNull(),
+    externalPort: integer("external_port"),
+    description: text("description"),
+  },
+  (table) => [
+    uniqueIndex("application_ports_unique_port_uidx").on(table.applicationId, table.internalPort, table.protocol),
+    index("application_ports_application_idx").on(table.applicationId),
+  ],
+);
+
+/** Non-secret application variables. Environment-specific entries override global application defaults. */
+export const applicationEnvironmentVariables = pgTable(
+  "application_environment_variables",
+  {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id").references(() => projectEnvironments.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    valueEncrypted: text("value_encrypted").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index("application_environment_variables_application_idx").on(table.applicationId),
+    index("application_environment_variables_environment_idx").on(table.environmentId),
+  ],
+);
+
+/** References an existing encrypted project-environment secret; never stores its value. */
+export const applicationSecretAttachments = pgTable(
+  "application_secret_attachments",
+  {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id").references(() => projectEnvironments.id, { onDelete: "cascade" }),
+    secretEnvironmentVariableId: text("secret_environment_variable_id").notNull().references(() => environmentVariables.id, { onDelete: "restrict" }),
+    targetKey: text("target_key").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("application_secret_attachments_target_uidx").on(table.applicationId, table.environmentId, table.targetKey),
+    index("application_secret_attachments_application_idx").on(table.applicationId),
+  ],
+);
+
+export const applicationVolumeMounts = pgTable(
+  "application_volume_mounts",
+  {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+    volumeName: text("volume_name").notNull(),
+    mountPath: text("mount_path").notNull(),
+    readOnly: boolean("read_only").default(false).notNull(),
+  },
+  (table) => [
+    uniqueIndex("application_volume_mounts_path_uidx").on(table.applicationId, table.mountPath),
+    index("application_volume_mounts_application_idx").on(table.applicationId),
   ],
 );
 

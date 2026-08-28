@@ -46,6 +46,7 @@ const startPayload = z.object({
           z.object({
             containerPort: z.number().int().min(1).max(65_535),
             protocol: z.enum(["tcp", "udp"]).optional(),
+            exposure: z.enum(["private", "public"]).optional(),
           }),
         )
         .optional(),
@@ -54,9 +55,15 @@ const startPayload = z.object({
           z.object({
             name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),
             target: z.string().startsWith("/"),
+            readOnly: z.boolean().optional(),
           }),
         )
         .optional(),
+      restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).optional(),
+      gracefulShutdownSeconds: z.number().int().min(1).max(600).optional(),
+      command: z.string().min(1).max(2_000).optional(),
+      workingDirectory: z.string().min(1).max(512).optional(),
+      healthCheck: z.object({ command: z.string().min(1).max(2_000), intervalSeconds: z.number().int().min(1).max(3_600), timeoutSeconds: z.number().int().min(1).max(600), retries: z.number().int().min(1).max(20), startPeriodSeconds: z.number().int().min(0).max(3_600) }).optional(),
     })
     .default({}),
 });
@@ -157,17 +164,37 @@ async function report(
   });
 }
 
+async function workloadSecrets(identity: z.infer<typeof identitySchema>, workloadId: string): Promise<Record<string, string>> {
+  const response = await fetch(new URL(`/api/agents/workloads/${workloadId}/secrets`, config.DEVION_API_URL), {
+    headers: { authorization: `Bearer ${identity.agentToken}` },
+  });
+  if (!response.ok) throw new Error(`Workload secret retrieval failed: ${response.status}`);
+  const payload = z.object({ environment: z.record(z.string()) }).parse(await response.json());
+  return payload.environment;
+}
+
+async function reportWorkloadTelemetry(identity: z.infer<typeof identitySchema>): Promise<void> {
+  const response = await fetch(new URL("/api/agents/workloads", config.DEVION_API_URL), { headers: { authorization: `Bearer ${identity.agentToken}` } });
+  if (!response.ok) throw new Error(`Workload listing failed: ${response.status}`);
+  const assignments = z.array(z.object({ workloadId: z.string().uuid() })).parse(await response.json());
+  const reports = await Promise.all(assignments.map(async ({ workloadId }) => ({ workloadId, ...(await runtime.inspect(workloadId)) })));
+  const accepted = await fetch(new URL("/api/agents/workloads/telemetry", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ reports }) });
+  if (!accepted.ok) throw new Error(`Workload telemetry report failed: ${accepted.status}`);
+}
+
 async function execute(identity: z.infer<typeof identitySchema>, raw: unknown): Promise<void> {
   const command = commandSchema.parse(raw);
   try {
     if (command.type === "workload.start") {
       const payload = startPayload.parse(command.payload);
+      const secrets = await workloadSecrets(identity, payload.workloadId);
       const started = await runtime.start({
         workloadId: payload.workloadId,
         image: payload.image,
         cpuMilli: payload.requirements.cpuMilli,
         memoryMib: payload.requirements.memoryMib,
         ...payload.runtimeConfig,
+        environment: { ...payload.runtimeConfig.environment, ...secrets },
       });
       await report(identity, command.commandId, "succeeded", started);
       return;
@@ -233,6 +260,7 @@ async function tick(identity: z.infer<typeof identitySchema>): Promise<void> {
   if (!response.ok) throw new Error(`Command poll failed: ${response.status}`);
   for (const command of z.array(z.unknown()).parse(await response.json()))
     await execute(identity, command);
+  await reportWorkloadTelemetry(identity);
 }
 
 const { identity, enrolled } = await resolveIdentity();

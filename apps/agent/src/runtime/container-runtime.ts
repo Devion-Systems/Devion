@@ -6,8 +6,13 @@ export interface ContainerStartSpec {
   cpuMilli: number;
   memoryMib: number;
   environment?: Record<string, string>;
-  ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp" }>;
-  volumes?: Array<{ name: string; target: string }>;
+  ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp"; exposure?: "private" | "public" }>;
+  volumes?: Array<{ name: string; target: string; readOnly?: boolean }>;
+  restartPolicy?: "no" | "on-failure" | "always" | "unless-stopped";
+  gracefulShutdownSeconds?: number;
+  command?: string;
+  workingDirectory?: string;
+  healthCheck?: { command: string; intervalSeconds: number; timeoutSeconds: number; retries: number; startPeriodSeconds: number };
 }
 
 /** Docker Engine API adapter. The agent is the only process that accesses its local socket. */
@@ -24,7 +29,7 @@ export class ContainerRuntime {
       (spec.ports ?? []).map((port) => [`${port.containerPort}/${port.protocol ?? "tcp"}`, {}]),
     );
     const portBindings = Object.fromEntries(
-      (spec.ports ?? []).map((port) => [
+      (spec.ports ?? []).filter((port) => port.exposure === "public").map((port) => [
         `${port.containerPort}/${port.protocol ?? "tcp"}`,
         [{ HostIp: "0.0.0.0", HostPort: "" }],
       ]),
@@ -40,13 +45,16 @@ export class ContainerRuntime {
       ...(spec.environment
         ? { Env: Object.entries(spec.environment).map(([key, value]) => `${key}=${value}`) }
         : {}),
+      ...(spec.command ? { Cmd: ["/bin/sh", "-lc", spec.command] } : {}),
+      ...(spec.workingDirectory ? { WorkingDir: spec.workingDirectory } : {}),
       Labels: { "devion.managed": "true", "devion.workload-id": spec.workloadId },
+      ...(spec.healthCheck ? { Healthcheck: { Test: ["CMD-SHELL", spec.healthCheck.command], Interval: spec.healthCheck.intervalSeconds * 1_000_000_000, Timeout: spec.healthCheck.timeoutSeconds * 1_000_000_000, Retries: spec.healthCheck.retries, StartPeriod: spec.healthCheck.startPeriodSeconds * 1_000_000_000 } } : {}),
       ...(Object.keys(exposedPorts).length > 0 ? { ExposedPorts: exposedPorts } : {}),
       HostConfig: {
         NanoCpus: spec.cpuMilli * 1_000_000,
         Memory: spec.memoryMib * 1024 * 1024,
         MemorySwap: spec.memoryMib * 1024 * 1024,
-        RestartPolicy: { Name: "unless-stopped" },
+        RestartPolicy: { Name: spec.restartPolicy ?? "unless-stopped" },
         ...(Object.keys(portBindings).length > 0 ? { PortBindings: portBindings } : {}),
         ...(spec.volumes?.length
           ? {
@@ -54,6 +62,7 @@ export class ContainerRuntime {
                 Type: "volume",
                 Source: volume.name,
                 Target: volume.target,
+                ReadOnly: volume.readOnly ?? false,
               })),
             }
           : {}),
@@ -72,11 +81,23 @@ export class ContainerRuntime {
     return { runtimeId: name, ports };
   }
 
-  async stop(workloadId: string): Promise<void> {
+  async stop(workloadId: string, gracefulShutdownSeconds = 15): Promise<void> {
     await this.request(
       "POST",
-      `/containers/${encodeURIComponent(this.name(workloadId))}/stop?t=15`,
+      `/containers/${encodeURIComponent(this.name(workloadId))}/stop?t=${gracefulShutdownSeconds}`,
     );
+  }
+
+  async inspect(workloadId: string): Promise<{ actualState: "running" | "stopped" | "failed" | "unknown"; healthStatus: "none" | "starting" | "healthy" | "unhealthy" }> {
+    try {
+      const container = await this.request<{ State?: { Running?: boolean; Dead?: boolean; Error?: string; Health?: { Status?: string } } }>("GET", `/containers/${encodeURIComponent(this.name(workloadId))}/json`);
+      const health = container.State?.Health?.Status;
+      const healthStatus = health === "starting" || health === "healthy" || health === "unhealthy" ? health : "none";
+      return { actualState: container.State?.Running ? "running" : container.State?.Dead || container.State?.Error ? "failed" : "stopped", healthStatus };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("404")) return { actualState: "stopped", healthStatus: "none" };
+      return { actualState: "unknown", healthStatus: "none" };
+    }
   }
 
   async remove(workloadId: string): Promise<void> {
