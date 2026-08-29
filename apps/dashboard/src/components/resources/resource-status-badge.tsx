@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 export type ResourceStatus =
   | "healthy" | "ready" | "deploying" | "starting" | "degraded"
   | "failed" | "failing" | "stopped" | "idle" | "unknown"
-  | "queued" | "running" | "pushing" | "succeeded" | "cancelled" | "active" | "archived";
+  | "queued" | "running" | "pushing" | "succeeded" | "cancelled" | "active" | "archived" | "stopping" | "superseded" | "scheduling";
 
 const config: Record<ResourceStatus, { label: string; className: string; icon: typeof CheckCircle2 }> = {
   healthy: { label: "Gesund", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300", icon: CheckCircle2 },
@@ -25,6 +25,9 @@ const config: Record<ResourceStatus, { label: string; className: string; icon: t
   idle: { label: "Inaktiv", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
   unknown: { label: "Unbekannt", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: CircleHelp },
   queued: { label: "In Warteschlange", className: "border-sky-400/20 bg-sky-400/10 text-sky-300", icon: Clock3 },
+  scheduling: { label: "Wird geplant", className: "border-sky-400/20 bg-sky-400/10 text-sky-300", icon: Clock3 },
+  stopping: { label: "Wird gestoppt", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
+  superseded: { label: "Ersetzt", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
   running: { label: "Build läuft", className: "border-sky-400/20 bg-sky-400/10 text-sky-300", icon: Clock3 },
   pushing: { label: "Image Push", className: "border-violet-400/20 bg-violet-400/10 text-violet-300", icon: Clock3 },
   succeeded: { label: "Erfolgreich", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300", icon: CheckCircle2 },

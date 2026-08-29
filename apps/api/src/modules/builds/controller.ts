@@ -1,8 +1,9 @@
 import { applicationDeployments, applications, auditLogs, builds, db, deployments } from "@repo/db";
-import { asc, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Logger } from "pino";
 import { getBuilderRun } from "../../features/builds/builder-client.js";
-import { reconcileDeployment } from "../deployments/controller.js";
+import { reconcileDeployment, supersedePreviousDeployments } from "../deployments/controller.js";
+import { createDeployment } from "../deployments/service.js";
 
 export async function reconcileBuild(buildId: string): Promise<void> {
   const build = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
@@ -33,33 +34,37 @@ export async function reconcileBuild(buildId: string): Promise<void> {
     return;
   }
   let deploymentId: string | undefined;
+  let createdDeployment = false;
   await db.transaction(async (tx) => {
     const current = await tx.query.builds.findFirst({ where: eq(builds.id, build.id) });
     if (!current || current.status === "succeeded") return;
     const existing = await tx.query.deployments.findFirst({ where: eq(deployments.buildId, build.id) });
     if (existing) { deploymentId = existing.id; return; }
-    const previous = await tx.select({ version: deployments.version }).from(deployments).where(eq(deployments.applicationId, build.applicationId)).orderBy(asc(deployments.version));
-    deploymentId = crypto.randomUUID();
     await tx.update(builds).set({ status: "succeeded", commitSha, imageDigest: artifact.digest, completedAt: run.finishedAt ? new Date(run.finishedAt) : new Date() }).where(eq(builds.id, build.id));
     await tx.update(applications).set({ status: "deploying", lastKnownCommit: commitSha }).where(eq(applications.id, build.applicationId));
-    await tx.insert(deployments).values({
-      id: deploymentId,
-      applicationId: build.applicationId,
-      version: (previous.at(-1)?.version ?? 0) + 1,
-      image: `${build.imageRepository}@${artifact.digest}`,
-      replicas: Number((build.buildConfiguration as { deployment?: { replicas?: number } }).deployment?.replicas ?? 1),
-      desiredState: "running",
-      runtime: "container",
-      requirements: (build.buildConfiguration as { requirements?: unknown }).requirements ?? { cpuMilli: 250, memoryMib: 256, storageMib: 0, runtime: "container" },
-      runtimeConfig: { ...((build.buildConfiguration as { runtimeConfig?: Record<string, unknown> }).runtimeConfig ?? {}), buildId: build.id, commitSha },
-      configurationSnapshot: { ...((build.buildConfiguration as { configurationSnapshot?: Record<string, unknown> }).configurationSnapshot ?? {}), artifact: { image: `${build.imageRepository}@${artifact.digest}`, digest: artifact.digest }, buildId: build.id, commitSha },
-      buildId: build.id,
-      commitSha,
-      createdBy: build.triggeredBy,
-    });
-    await tx.insert(applicationDeployments).values({ id: crypto.randomUUID(), applicationId: build.applicationId, actorId: build.triggeredBy, action: "deploy", status: "succeeded", message: `Deployment ${deploymentId} created from build ${build.id}` });
-    await tx.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: build.triggeredBy, action: "deployment.created_from_build", targetType: "deployment", targetId: deploymentId, metadata: JSON.stringify({ projectId: build.projectId, buildId: build.id, commitSha }) });
+    createdDeployment = true;
   });
+  if (createdDeployment) {
+    try {
+      const deployment = await createDeployment({
+        applicationId: build.applicationId,
+        image: `${build.imageRepository}@${artifact.digest}`,
+        replicas: Number((build.buildConfiguration as { deployment?: { replicas?: number } }).deployment?.replicas ?? 1),
+        desiredState: "running", runtime: "container",
+        requirements: (build.buildConfiguration as { requirements?: unknown }).requirements ?? { cpuMilli: 250, memoryMib: 256, storageMib: 0, runtime: "container" },
+        runtimeConfig: { ...((build.buildConfiguration as { runtimeConfig?: Record<string, unknown> }).runtimeConfig ?? {}), buildId: build.id, commitSha },
+        configurationSnapshot: { ...((build.buildConfiguration as { configurationSnapshot?: Record<string, unknown> }).configurationSnapshot ?? {}), artifact: { image: `${build.imageRepository}@${artifact.digest}`, digest: artifact.digest }, buildId: build.id, commitSha },
+        buildId: build.id, commitSha, createdBy: build.triggeredBy,
+      });
+      deploymentId = deployment.id;
+      await supersedePreviousDeployments(build.applicationId, deployment.id);
+      await db.insert(applicationDeployments).values({ id: crypto.randomUUID(), applicationId: build.applicationId, actorId: build.triggeredBy, action: "deploy", status: "succeeded", message: `Deployment ${deploymentId} created from build ${build.id}` });
+      await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: build.triggeredBy, action: "deployment.created_from_build", targetType: "deployment", targetId: deploymentId, metadata: JSON.stringify({ projectId: build.projectId, buildId: build.id, commitSha }) });
+    } catch (error) {
+      await db.update(builds).set({ status: "failed", errorCode: "DEPLOYMENT_CREATE_FAILED", errorMessage: error instanceof Error ? error.message : "Deployment could not be created", completedAt: new Date() }).where(eq(builds.id, build.id));
+      throw error;
+    }
+  }
   if (deploymentId) await reconcileDeployment(deploymentId);
 }
 

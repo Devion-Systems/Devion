@@ -4,6 +4,13 @@ export type MetricBucket = { timestamp: string; cpuAverage: number | null; cpuMa
 
 export function aggregateWorkloadMetrics(samples: WorkloadMetricSample[], bucketMs: number): MetricBucket[] {
   const buckets = new Map<number, WorkloadMetricSample[]>();
+  const previousSample = new Map<WorkloadMetricSample, WorkloadMetricSample>();
+  const ordered = [...samples].sort((left, right) => left.workloadId.localeCompare(right.workloadId) || left.recordedAt.getTime() - right.recordedAt.getTime());
+  let previous: WorkloadMetricSample | undefined;
+  for (const sample of ordered) {
+    if (previous?.workloadId === sample.workloadId) previousSample.set(sample, previous);
+    previous = sample;
+  }
   for (const sample of samples) {
     const key = Math.floor(sample.recordedAt.getTime() / bucketMs) * bucketMs;
     buckets.set(key, [...(buckets.get(key) ?? []), sample]);
@@ -21,10 +28,16 @@ export function aggregateWorkloadMetrics(samples: WorkloadMetricSample[], bucket
     const memoryByWorkload = series.map((items) => items.reduce((total, item) => total + item.memoryUsageBytes, 0) / items.length);
     const memoryMaxByWorkload = series.map((items) => Math.max(...items.map((item) => item.memoryUsageBytes)));
     const rate = (field: "networkRxBytes" | "networkTxBytes" | "diskReadBytes" | "diskWriteBytes") => [...byWorkload.values()].reduce((total, series) => {
-      if (series.length < 2) return total;
-      const elapsed = Math.max(1, (series.at(-1)!.recordedAt.getTime() - series[0]!.recordedAt.getTime()) / 1_000);
-      const delta = series.slice(1).reduce((sum, item, index) => {
-        const previous = series[index]![field];
+      // At 30-second resolution a bucket can contain only one point. Use the
+      // preceding point of that workload when available, rather than showing
+      // a misleading zero rate for every such bucket.
+      const rateSeries = series.length === 1 && previousSample.has(series[0]!)
+        ? [previousSample.get(series[0]!)!, series[0]!]
+        : series;
+      if (rateSeries.length < 2) return total;
+      const elapsed = Math.max(1, (rateSeries.at(-1)!.recordedAt.getTime() - rateSeries[0]!.recordedAt.getTime()) / 1_000);
+      const delta = rateSeries.slice(1).reduce((sum, item, index) => {
+        const previous = rateSeries[index]![field];
         return sum + (item[field] >= previous ? item[field] - previous : item[field]);
       }, 0);
       return total + delta / elapsed;

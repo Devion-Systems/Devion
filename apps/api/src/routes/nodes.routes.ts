@@ -5,6 +5,7 @@ import {
   applications,
   auditLogs,
   db,
+  deploymentEvents,
   deployments,
   environmentVariables,
   gameServers,
@@ -27,6 +28,7 @@ import { decryptEnvironmentValue } from "../features/environments/crypto.js";
 import { normalizeAdvertisedAddress } from "../features/routing/safe-address.js";
 import { PostgresWorkloadMetricsProvider } from "../features/metrics/postgres-provider.js";
 import { reconcileDomainRoutesForNode } from "../features/routing/controller.js";
+import { refreshDeploymentStatus } from "../modules/deployments/service.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
@@ -510,6 +512,16 @@ routes.post("/api/agents/workloads/telemetry", async (c) => {
     await db.update(workloads).set({ actualState: report.actualState, healthStatus: report.healthStatus, healthMessage: null, ...(report.ports === undefined ? {} : { publishedPorts: report.ports }), lastReportedAt: new Date() }).where(and(eq(workloads.id, report.workloadId), eq(workloads.nodeId, node.id)));
     if (report.ports !== undefined) await replaceObservedWorkloadPorts(node.id, report.workloadId, report.ports);
   }));
+  const reportedIds = parsed.data.reports.map((report) => report.workloadId);
+  const reportedWorkloads = reportedIds.length
+    ? await db.select({ deploymentId: workloads.deploymentId }).from(workloads).where(and(inArray(workloads.id, reportedIds), eq(workloads.nodeId, node.id)))
+    : [];
+  await Promise.all([...new Set(reportedWorkloads.map((workload) => workload.deploymentId))].map((deploymentId) => refreshDeploymentStatus(deploymentId)));
+  if (parsed.data.reports.some((report) => report.ports !== undefined)) {
+    void reconcileDomainRoutesForNode(node.id).catch((error) =>
+      c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload port report"),
+    );
+  }
   return c.json({ accepted: parsed.data.reports.length });
 });
 
@@ -569,6 +581,12 @@ routes.post("/api/agents/commands/results", async (c) => {
       where: eq(workloads.id, command.resourceId),
     });
     if (workload) {
+      await db.insert(deploymentEvents).values({
+        id: crypto.randomUUID(), deploymentId: workload.deploymentId, workloadId: workload.id, nodeId: node.id,
+        type: result.status === "succeeded" ? "workload.started" : "workload.start_failed",
+        message: result.status === "succeeded" ? "Workload started on agent" : "Agent failed to start workload",
+        reason: result.status === "succeeded" ? null : typeof (result.data as { error?: unknown } | undefined)?.error === "string" ? (result.data as { error: string }).error : null,
+      });
       const deployment = await db.query.deployments.findFirst({
         where: eq(deployments.id, workload.deploymentId),
       });
@@ -590,8 +608,14 @@ routes.post("/api/agents/commands/results", async (c) => {
             .where(eq(gameServers.applicationId, deployment.applicationId));
         }
       }
+      await refreshDeploymentStatus(workload.deploymentId);
     }
-    if (runtime.success && runtime.data.ports) await replaceObservedWorkloadPorts(node.id, command.resourceId, runtime.data.ports);
+    if (runtime.success && runtime.data.ports) {
+      await replaceObservedWorkloadPorts(node.id, command.resourceId, runtime.data.ports);
+    }
+    void reconcileDomainRoutesForNode(node.id).catch((error) =>
+      c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload start"),
+    );
   } else if (command.type === "workload.stop" || command.type === "workload.delete") {
     await db
       .update(workloads)
@@ -600,6 +624,18 @@ routes.post("/api/agents/commands/results", async (c) => {
         lastReportedAt: new Date(),
       })
       .where(and(eq(workloads.id, command.resourceId), eq(workloads.nodeId, node.id)));
+    const workload = await db.query.workloads.findFirst({ where: eq(workloads.id, command.resourceId) });
+    if (workload) {
+      await db.insert(deploymentEvents).values({
+        id: crypto.randomUUID(), deploymentId: workload.deploymentId, workloadId: workload.id, nodeId: node.id,
+        type: result.status === "succeeded" ? "workload.stopped" : "workload.stop_failed",
+        message: result.status === "succeeded" ? "Workload stopped on agent" : "Agent failed to stop workload",
+      });
+      await refreshDeploymentStatus(workload.deploymentId);
+    }
+    void reconcileDomainRoutesForNode(node.id).catch((error) =>
+      c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload stop"),
+    );
   }
   return c.body(null, 204);
 });

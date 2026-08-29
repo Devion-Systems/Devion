@@ -12,6 +12,7 @@ import {
   auditLogs,
   builds,
   db,
+  deploymentEvents,
   deployments,
   environmentVariables,
   projectEnvironments,
@@ -25,8 +26,11 @@ import { z } from "zod";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import {
   reconcileDeployment,
+  restartDeploymentWorkloads,
   stopApplicationWorkloads,
+  supersedePreviousDeployments,
 } from "../modules/deployments/controller.js";
+import { createDeployment, createRedeployment, createRollbackDeployment, refreshDeploymentStatus } from "../modules/deployments/service.js";
 import type { AppEnv } from "../types/env.js";
 import { listAccessibleProjects, resolveProjectAccess } from "../features/projects/access.js";
 import { decryptEnvironmentValue, encryptEnvironmentValue } from "../features/environments/crypto.js";
@@ -409,6 +413,156 @@ async function applicationInScope(scope: NonNullable<Awaited<ReturnType<typeof g
   return db.query.applications.findFirst({ where: and(eq(applications.id, applicationId), eq(applications.projectId, scope.project.id)) });
 }
 
+async function deploymentInScope(scope: NonNullable<Awaited<ReturnType<typeof getProjectScope>>>, deploymentId: string) {
+  const [item] = await db.select({ deployment: deployments, application: applications })
+    .from(deployments)
+    .innerJoin(applications, eq(deployments.applicationId, applications.id))
+    .where(and(eq(deployments.id, deploymentId), eq(applications.projectId, scope.project.id)))
+    .limit(1);
+  return item ?? null;
+}
+
+const deploymentListQuery = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(30) });
+type DeploymentMarkerItem = { deployment: { id: string; applicationId: string; version: number; desiredState: string; status: string } };
+function markDeploymentRevisions<T extends DeploymentMarkerItem>(items: T[], universe: DeploymentMarkerItem[] = items) {
+  const byApplication = new Map<string, T[]>();
+  for (const item of universe) byApplication.set(item.deployment.applicationId, [...(byApplication.get(item.deployment.applicationId) ?? []), item as T]);
+  return items.map((item) => {
+    const revisions = byApplication.get(item.deployment.applicationId) ?? [];
+    const latest = revisions.reduce((best, candidate) => candidate.deployment.version > best.deployment.version ? candidate : best, item);
+    const current = revisions.filter((candidate) => candidate.deployment.desiredState === "running").reduce<T | undefined>((best, candidate) => !best || candidate.deployment.version > best.deployment.version ? candidate : best, undefined);
+    const successful = revisions.filter((candidate) => candidate.deployment.status === "running").reduce<T | undefined>((best, candidate) => !best || candidate.deployment.version > best.deployment.version ? candidate : best, undefined);
+    return { ...item, revisionState: { isLatest: item.deployment.id === latest.deployment.id, isCurrent: item.deployment.id === current?.deployment.id, isLastSuccessful: item.deployment.id === successful?.deployment.id } };
+  });
+}
+
+routes.get("/:orgSlug/deployments", async (c) => {
+  const accessible = await listAccessibleProjects(c.req.raw, c.req.param("orgSlug"), "deployments.read");
+  if (!accessible) return c.json({ error: "Organization not found or access denied" }, 404);
+  const query = deploymentListQuery.safeParse(c.req.query());
+  if (!query.success) return c.json({ error: "Invalid pagination" }, 400);
+  const projectIds = accessible.projects.map((project) => project.id);
+  if (!projectIds.length) return c.json({ items: [], page: query.data.page, limit: query.data.limit, total: 0 });
+  const offset = (query.data.page - 1) * query.data.limit;
+  const items = await db.select({ deployment: deployments, application: { id: applications.id, name: applications.name, slug: applications.slug }, project: { id: projects.id, name: projects.name } })
+    .from(deployments).innerJoin(applications, eq(deployments.applicationId, applications.id)).innerJoin(projects, eq(applications.projectId, projects.id))
+    .where(inArray(applications.projectId, projectIds)).orderBy(desc(deployments.createdAt)).limit(query.data.limit).offset(offset);
+  const [total] = await db.select({ total: count() }).from(deployments).innerJoin(applications, eq(deployments.applicationId, applications.id)).where(inArray(applications.projectId, projectIds));
+  const universe = items.length ? await db.select({ deployment: deployments }).from(deployments).where(inArray(deployments.applicationId, [...new Set(items.map((item) => item.deployment.applicationId))])) : [];
+  return c.json({ items: markDeploymentRevisions(items, universe), page: query.data.page, limit: query.data.limit, total: total?.total ?? 0 });
+});
+
+routes.get("/:orgSlug/projects/:projectId/deployments", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!scope.permissions.includes("deployments.read")) return c.json({ error: "Permission required: deployments.read" }, 403);
+  const query = deploymentListQuery.safeParse(c.req.query());
+  if (!query.success) return c.json({ error: "Invalid pagination" }, 400);
+  const offset = (query.data.page - 1) * query.data.limit;
+  const items = await db.select({ deployment: deployments, application: { id: applications.id, name: applications.name, slug: applications.slug } })
+    .from(deployments).innerJoin(applications, eq(deployments.applicationId, applications.id))
+    .where(eq(applications.projectId, scope.project.id)).orderBy(desc(deployments.createdAt)).limit(query.data.limit).offset(offset);
+  const [total] = await db.select({ total: count() }).from(deployments).innerJoin(applications, eq(deployments.applicationId, applications.id)).where(eq(applications.projectId, scope.project.id));
+  const universe = items.length ? await db.select({ deployment: deployments }).from(deployments).where(inArray(deployments.applicationId, [...new Set(items.map((item) => item.deployment.applicationId))])) : [];
+  return c.json({ items: markDeploymentRevisions(items, universe), page: query.data.page, limit: query.data.limit, total: total?.total ?? 0 });
+});
+
+routes.get("/:orgSlug/projects/:projectId/deployments/:deploymentId", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!scope.permissions.includes("deployments.read")) return c.json({ error: "Permission required: deployments.read" }, 403);
+  const item = await deploymentInScope(scope, c.req.param("deploymentId"));
+  if (!item) return c.json({ error: "Deployment not found" }, 404);
+  const [workloadItems, eventItems] = await Promise.all([
+    db.select().from(workloads).where(eq(workloads.deploymentId, item.deployment.id)).orderBy(asc(workloads.createdAt)),
+    db.select().from(deploymentEvents).where(eq(deploymentEvents.deploymentId, item.deployment.id)).orderBy(desc(deploymentEvents.createdAt)).limit(100),
+  ]);
+  const revisions = await db.select({ deployment: deployments }).from(deployments).where(eq(deployments.applicationId, item.deployment.applicationId));
+  const revisionState = markDeploymentRevisions(revisions).find((revision) => revision.deployment.id === item.deployment.id)?.revisionState;
+  return c.json({ deployment: item.deployment, application: item.application, revisionState, workloads: workloadItems, events: eventItems, secretPolicy: "Secret references are immutable; secret values are resolved by the agent at runtime and are never stored in a deployment snapshot." });
+});
+
+routes.get("/:orgSlug/projects/:projectId/deployments/:deploymentId/events", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!scope.permissions.includes("deployments.read")) return c.json({ error: "Permission required: deployments.read" }, 403);
+  const item = await deploymentInScope(scope, c.req.param("deploymentId"));
+  if (!item) return c.json({ error: "Deployment not found" }, 404);
+  return c.json(await db.select().from(deploymentEvents).where(eq(deploymentEvents.deploymentId, item.deployment.id)).orderBy(desc(deploymentEvents.createdAt)).limit(500));
+});
+
+routes.get("/:orgSlug/projects/:projectId/deployments/:deploymentId/metrics", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!scope.permissions.includes("deployments.read")) return c.json({ error: "Permission required: deployments.read" }, 403);
+  const item = await deploymentInScope(scope, c.req.param("deploymentId"));
+  if (!item) return c.json({ error: "Deployment not found" }, 404);
+  const range = z.enum(["15m", "1h", "6h", "24h", "7d"]).safeParse(c.req.query("range") ?? "1h");
+  if (!range.success) return c.json({ error: "Invalid metrics range" }, 400);
+  const durationMs = ({ "15m": 15 * 60_000, "1h": 60 * 60_000, "6h": 6 * 60 * 60_000, "24h": 24 * 60 * 60_000, "7d": 7 * 24 * 60 * 60_000 } as const)[range.data];
+  const to = new Date(); const from = new Date(to.getTime() - durationMs); const bucketMs = metricBucketMs(range.data);
+  const workloadIds = (await db.select({ id: workloads.id }).from(workloads).where(eq(workloads.deploymentId, item.deployment.id))).map((workload) => workload.id);
+  const samples = await new PostgresWorkloadMetricsProvider().query(workloadIds, from, to, bucketMs);
+  return c.json({ range: range.data, from: from.toISOString(), to: to.toISOString(), workloads: workloadIds, samples: aggregateWorkloadMetrics(samples, bucketMs) });
+});
+
+routes.get("/:orgSlug/projects/:projectId/deployments/:deploymentId/logs", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!scope.permissions.includes("deployments.read")) return c.json({ error: "Permission required: deployments.read" }, 403);
+  const item = await deploymentInScope(scope, c.req.param("deploymentId"));
+  if (!item) return c.json({ error: "Deployment not found" }, 404);
+  const query = applicationLogsQuery.safeParse(c.req.query());
+  if (!query.success) return c.json({ error: "Invalid log request" }, 400);
+  const active = await db.select({ id: workloads.id, nodeId: workloads.nodeId, actualState: workloads.actualState }).from(workloads).where(eq(workloads.deploymentId, item.deployment.id));
+  const entries = await Promise.all(active.map(async (workload) => {
+    const [latest, pending] = await Promise.all([
+      db.select({ result: agentCommands.result, completedAt: agentCommands.completedAt }).from(agentCommands).where(and(eq(agentCommands.resourceId, workload.id), eq(agentCommands.type, "workload.logs"), eq(agentCommands.status, "succeeded"))).orderBy(desc(agentCommands.completedAt)).limit(1),
+      db.query.agentCommands.findFirst({ where: and(eq(agentCommands.resourceId, workload.id), eq(agentCommands.type, "workload.logs"), or(eq(agentCommands.status, "pending"), eq(agentCommands.status, "delivered"))) }),
+    ]);
+    if (workload.nodeId && workload.actualState === "running" && !pending) await db.insert(agentCommands).values({ id: crypto.randomUUID(), nodeId: workload.nodeId, type: "workload.logs", resourceId: workload.id, payload: { tail: query.data.tail } });
+    const result = latest[0]?.result as { data?: { logs?: unknown } } | null;
+    return { workloadId: workload.id, status: workload.actualState, logs: typeof result?.data?.logs === "string" ? result.data.logs : "", updatedAt: latest[0]?.completedAt?.toISOString() ?? null };
+  }));
+  return c.json({ workloads: entries });
+});
+
+async function runDeploymentAction(c: any, action: "start" | "stop" | "restart" | "rollback" | "redeploy") {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  const permissionByAction = {
+    start: "deployments.start",
+    stop: "deployments.stop",
+    restart: "deployments.restart",
+    rollback: "deployments.rollback",
+    redeploy: "deployments.redeploy",
+  } as const;
+  const permission = permissionByAction[action];
+  if (!scope.permissions.includes(permission)) return c.json({ error: `Permission required: ${permission}` }, 403);
+  const item = await deploymentInScope(scope, c.req.param("deploymentId"));
+  if (!item) return c.json({ error: "Deployment not found" }, 404);
+  if (action === "start" && item.deployment.status === "superseded")
+    return c.json({ error: "Superseded revisions cannot be started directly; use redeploy to create a new current revision" }, 409);
+  if (action === "rollback" || action === "redeploy") {
+    const created = action === "rollback" ? await createRollbackDeployment(item.deployment.id, scope.userId) : await createRedeployment(item.deployment.id, scope.userId);
+    await supersedePreviousDeployments(created.applicationId, created.id);
+    await reconcileDeployment(created.id);
+    await recordAudit(`deployment.${action}`, created.id, scope.userId, c.req.raw, scope.project.id);
+    return c.json({ deploymentId: created.id, revision: created.version, status: created.status, sourceDeploymentId: item.deployment.id }, 202);
+  }
+  const desiredState = action === "stop" ? "stopped" : "running";
+  await db.update(deployments).set({ desiredState, status: action === "stop" ? "stopping" : "queued", failureReason: null }).where(eq(deployments.id, item.deployment.id));
+  await db.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: item.deployment.id, type: `deployment.${action}_requested`, message: `${action[0]!.toUpperCase()}${action.slice(1)} requested` });
+  if (action === "restart") await restartDeploymentWorkloads(item.deployment.id); else await reconcileDeployment(item.deployment.id);
+  await refreshDeploymentStatus(item.deployment.id);
+  await recordAudit(`deployment.${action}`, item.deployment.id, scope.userId, c.req.raw, scope.project.id);
+  return c.json({ deploymentId: item.deployment.id, status: action === "stop" ? "stopping" : "queued" }, 202);
+}
+
+for (const action of ["start", "stop", "restart", "rollback", "redeploy"] as const) {
+  routes.post(`/:orgSlug/projects/:projectId/deployments/:deploymentId/${action}`, (c) => runDeploymentAction(c, action));
+}
+
 routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/configuration", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
@@ -684,17 +838,9 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
   };
   const secretReferences = environmentId ? await db.select({ id: applicationSecretAttachments.id, targetKey: applicationSecretAttachments.targetKey, secretEnvironmentVariableId: applicationSecretAttachments.secretEnvironmentVariableId }).from(applicationSecretAttachments).where(and(eq(applicationSecretAttachments.applicationId, application.id), eq(applicationSecretAttachments.environmentId, environmentId))) : [];
   const configurationSnapshot = { source: { type: application.sourceType === "docker" ? "image" : "git", image: application.imageName }, environmentId: environmentId ?? null, runtime: runtimeDefaults ?? { runtime: "container", replicas: 1, restartPolicy: "unless-stopped", gracefulShutdownSeconds: 15 }, resources: requirements, ports, volumes: configuredVolumes, environmentKeys: Object.keys(environment), applicationVariableKeys: applicationVariables.map((variable) => ({ key: variable.key, environmentId: variable.environmentId })), secretReferences, registryCredentialReference: application.registryCredentialReference };
-  const previous = await db
-    .select({ version: deployments.version })
-    .from(deployments)
-    .where(eq(deployments.applicationId, application.id))
-    .orderBy(desc(deployments.version))
-    .limit(1);
-  const deploymentId = crypto.randomUUID();
-  await db.insert(deployments).values({
-    id: deploymentId,
+  const deployment = await createDeployment({
     applicationId: application.id,
-    version: (previous[0]?.version ?? 0) + 1,
+    environmentId,
     image: application.imageName,
     replicas: parsed.data.replicas ?? runtimeDefaults?.replicas ?? 1,
     desiredState: "running",
@@ -702,6 +848,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
     requirements,
     runtimeConfig,
     configurationSnapshot,
+    createdBy: scope.userId,
   });
   await db
     .update(applications)
@@ -713,11 +860,12 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
     actorId: scope.userId,
     action: "deploy",
     status: "succeeded",
-    message: `Deployment ${deploymentId} queued for agent reconciliation`,
+    message: `Deployment ${deployment.id} queued for agent reconciliation`,
   });
-  await reconcileDeployment(deploymentId);
+  await supersedePreviousDeployments(application.id, deployment.id);
+  await reconcileDeployment(deployment.id);
   await recordAudit("application.deployed", application.id, scope.userId, c.req.raw, scope.project.id);
-  return c.json({ deploymentId, status: "deploying", internalPort: application.internalPort }, 202);
+  return c.json({ deploymentId: deployment.id, revision: deployment.version, status: "deploying", internalPort: application.internalPort }, 202);
 });
 
 routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/stop", async (c) => {

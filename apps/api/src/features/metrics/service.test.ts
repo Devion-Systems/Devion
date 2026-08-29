@@ -37,3 +37,13 @@ test("sums memory and network rates across replicas without sample-frequency bia
   expect(bucket?.memoryMaxBytes).toBe(100);
   expect(bucket?.networkRxBytesPerSecond).toBe(30);
 });
+
+test("uses the preceding sample for a single-sample bucket rate", () => {
+  const samples = [
+    { workloadId: "a", nodeId: "n", recordedAt: new Date(0), cpuUsagePercent: 0, memoryUsageBytes: 1, memoryLimitBytes: null, networkRxBytes: 0, networkTxBytes: 0, diskReadBytes: 0, diskWriteBytes: 0 },
+    { workloadId: "a", nodeId: "n", recordedAt: new Date(30_000), cpuUsagePercent: 0, memoryUsageBytes: 1, memoryLimitBytes: null, networkRxBytes: 300, networkTxBytes: 0, diskReadBytes: 0, diskWriteBytes: 0 },
+  ];
+  const buckets = aggregateWorkloadMetrics(samples, 30_000);
+  expect(buckets[0]?.networkRxBytesPerSecond).toBe(0);
+  expect(buckets[1]?.networkRxBytesPerSecond).toBe(10);
+});

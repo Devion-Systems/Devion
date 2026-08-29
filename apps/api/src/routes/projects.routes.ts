@@ -1,5 +1,5 @@
 import { applicationDeployments, applicationPorts, applications, auditLogs, builds, db, deployments, managedDatabases, member, organization, projectDomains, projectEnvironments, projectTeams, projects, team, user } from "@repo/db";
-import { and, asc, count, desc, eq, inArray, like, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, like, ne, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
@@ -69,7 +69,8 @@ const dnsManager = new DnsManager(process.env.TRAEFIK_PUBLIC_IP, process.env.TRA
 async function setDomainRouteStatus(domain: typeof projectDomains.$inferSelect, status: "active" | "failed"): Promise<void> {
   if (domain.status === status) return;
   await db.transaction(async (tx) => {
-    await tx.update(projectDomains).set({ status }).where(eq(projectDomains.id, domain.id));
+    const changed = await tx.update(projectDomains).set({ status }).where(and(eq(projectDomains.id, domain.id), ne(projectDomains.status, status))).returning({ id: projectDomains.id });
+    if (!changed.length) return;
     await tx.insert(auditLogs).values({
       id: crypto.randomUUID(),
       actorId: null,

@@ -1,8 +1,9 @@
 import { type NodeSnapshot, scheduleWorkload, type WorkloadRequirements } from "@repo/core";
-import { agentCommands, db, deployments, nodes, workloads } from "@repo/db";
+import { agentCommands, db, deploymentEvents, deployments, nodes, workloads } from "@repo/db";
 import { and, eq, or } from "drizzle-orm";
 import type { Logger } from "pino";
 import { z } from "zod";
+import { refreshDeploymentStatus } from "./service.js";
 
 const requirementsSchema = z.object({
   cpuMilli: z.number().int().positive(),
@@ -32,19 +33,26 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
     await Promise.all(
       currentWorkloads.map((workload) => requestStateChange(workload, commandType)),
     );
+    await refreshDeploymentStatus(deployment.id);
     return;
   }
 
   const active = currentWorkloads.filter((workload) => workload.desiredState === "running");
   const missingReplicas = Math.max(0, deployment.replicas - active.length);
-  if (missingReplicas === 0) return;
+  if (missingReplicas === 0) {
+    await refreshDeploymentStatus(deployment.id);
+    return;
+  }
 
   const candidates = await loadCandidates();
   const persistentVolumes = Boolean(z.object({ volumes: z.array(z.unknown()).optional() }).safeParse(deployment.runtimeConfig).data?.volumes?.length);
   for (let index = 0; index < missingReplicas; index += 1) {
     const decision = scheduleWorkload(candidates, requirements);
     const nodeId = decision.nodeId;
-    if (!nodeId) return;
+    if (!nodeId) {
+      await refreshDeploymentStatus(deployment.id);
+      return;
+    }
     const workloadId = crypto.randomUUID();
     const commandId = crypto.randomUUID();
     const pinnedRequirements = persistentVolumes && !requirements.requiredNodeId
@@ -78,6 +86,28 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
     });
     requirements = pinnedRequirements;
     reserve(candidates, nodeId, requirements);
+  }
+  await refreshDeploymentStatus(deployment.id);
+}
+
+/** Recreates the current workload instances while preserving the deployment snapshot. */
+export async function restartDeploymentWorkloads(deploymentId: string): Promise<void> {
+  const currentWorkloads = await db.select().from(workloads).where(eq(workloads.deploymentId, deploymentId));
+  await Promise.all(currentWorkloads.map((workload) => requestStateChange(workload, "workload.stop")));
+  await reconcileDeployment(deploymentId);
+}
+
+/** A new revision becomes the sole desired running revision for an application. */
+export async function supersedePreviousDeployments(applicationId: string, currentDeploymentId: string): Promise<void> {
+  const previous = await db.select().from(deployments).where(and(eq(deployments.applicationId, applicationId), eq(deployments.desiredState, "running")));
+  for (const deployment of previous) {
+    if (deployment.id === currentDeploymentId) continue;
+    await db.transaction(async (tx) => {
+      await tx.update(deployments).set({ desiredState: "stopped", status: "superseded", failureReason: null }).where(eq(deployments.id, deployment.id));
+      await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: deployment.id, type: "deployment.superseded", message: `Superseded by deployment ${currentDeploymentId}` });
+    });
+    const workloadItems = await db.select().from(workloads).where(eq(workloads.deploymentId, deployment.id));
+    await Promise.all(workloadItems.map((workload) => requestStateChange(workload, "workload.stop")));
   }
 }
 

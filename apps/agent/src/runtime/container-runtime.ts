@@ -18,7 +18,7 @@ export interface ContainerStartSpec {
 
 /** Docker Engine API adapter. The agent is the only process that accesses its local socket. */
 export class ContainerRuntime {
-  constructor(private readonly socketPath: string) {}
+  constructor(private readonly socketPath: string, private readonly requestTimeoutMs = 10_000) {}
 
   async start(
     spec: ContainerStartSpec,
@@ -215,6 +215,7 @@ export class ContainerRuntime {
           socketPath: this.socketPath,
           method,
           path: `/v1.45${path}`,
+          timeout: this.requestTimeoutMs,
           headers: { ...(payload ? { "content-type": "application/json", "content-length": String(Buffer.byteLength(payload)) } : {}), ...headers },
         },
         (response) => {
@@ -237,6 +238,7 @@ export class ContainerRuntime {
         },
       );
       request.on("error", reject);
+      request.on("timeout", () => request.destroy(new Error("Docker API request timed out")));
       if (payload) request.write(payload);
       request.end();
     });
@@ -258,6 +260,7 @@ export class ContainerRuntime {
           socketPath: this.socketPath,
           method,
           path: `/v1.45${path}`,
+          timeout: this.requestTimeoutMs,
           headers: payload
             ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) }
             : undefined,
@@ -274,6 +277,7 @@ export class ContainerRuntime {
         },
       );
       request.on("error", reject);
+      request.on("timeout", () => request.destroy(new Error("Docker API request timed out")));
       if (payload) request.write(payload);
       request.end();
     });

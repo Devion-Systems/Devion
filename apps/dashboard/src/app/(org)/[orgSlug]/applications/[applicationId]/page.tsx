@@ -843,6 +843,7 @@ export default function ApplicationDetailPage() {
         {metrics.error ? <p role="alert" className="mt-4 text-sm text-red-300">{metrics.error.message}</p> : null}
         {!metrics.isLoading && !metrics.error && !(metrics.data?.samples.length) ? <p className="mt-4 text-sm text-zinc-500">Keine Metriken für diesen Zeitraum vorhanden.</p> : null}
         {metrics.data?.samples.length ? (() => { const latest = metrics.data.samples.at(-1)!; const cpu = latest.cpuAverage === null ? "—" : `${latest.cpuAverage.toFixed(1)} %`; const mib = latest.memoryAverageBytes / 1024 / 1024; const net = (latest.networkRxBytesPerSecond + latest.networkTxBytesPerSecond) / 1024; const disk = (latest.diskReadBytesPerSecond + latest.diskWriteBytesPerSecond) / 1024; return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">CPU</p><p className="mt-1 text-lg font-semibold text-zinc-100">{cpu}</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Arbeitsspeicher</p><p className="mt-1 text-lg font-semibold text-zinc-100">{mib.toFixed(1)} MiB</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Netzwerk</p><p className="mt-1 text-lg font-semibold text-zinc-100">{net.toFixed(1)} KiB/s</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Datenträger-I/O</p><p className="mt-1 text-lg font-semibold text-zinc-100">{disk.toFixed(1)} KiB/s</p></div></div>; })() : null}
+        {metrics.data?.samples.length ? (() => { const latest = metrics.data.samples.at(-1)!; return <div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Netzwerk RX</p><p className="mt-1 text-lg font-semibold text-zinc-100">{(latest.networkRxBytesPerSecond / 1024).toFixed(1)} KiB/s</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Netzwerk TX</p><p className="mt-1 text-lg font-semibold text-zinc-100">{(latest.networkTxBytesPerSecond / 1024).toFixed(1)} KiB/s</p></div></div>; })() : null}
       </section>
       {metricChartData.length > 1 ? <ChartContainer className="-mt-5 h-56 w-full" config={{ cpu: { label: "CPU", color: "#00cec9" }, memoryMiB: { label: "Arbeitsspeicher", color: "#74b9ff" } }}><AreaChart data={metricChartData}><defs><linearGradient id="metric-cpu" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00cec9" stopOpacity={0.35} /><stop offset="95%" stopColor="#00cec9" stopOpacity={0} /></linearGradient><linearGradient id="metric-memory" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#74b9ff" stopOpacity={0.25} /><stop offset="95%" stopColor="#74b9ff" stopOpacity={0} /></linearGradient></defs><CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" /><XAxis dataKey="time" tickLine={false} axisLine={false} minTickGap={24} /><YAxis yAxisId="cpu" tickLine={false} axisLine={false} width={40} tickFormatter={(value) => `${value}%`} /><YAxis yAxisId="memory" orientation="right" tickLine={false} axisLine={false} width={52} tickFormatter={(value) => `${value}M`} /><ChartTooltip content={<ChartTooltipContent />} /><Area yAxisId="cpu" type="monotone" dataKey="cpu" stroke="#00cec9" fill="url(#metric-cpu)" connectNulls /><Area yAxisId="memory" type="monotone" dataKey="memoryMiB" stroke="#74b9ff" fill="url(#metric-memory)" /></AreaChart></ChartContainer> : null}
       <section className="grid gap-4 xl:grid-cols-2">
@@ -851,8 +852,9 @@ export default function ApplicationDetailPage() {
           <div className="mt-4 space-y-3">
             {runtime.data?.deployments.length ? (
               runtime.data.deployments.map((item) => (
-                <div
+                <Link
                   key={item.id}
+                  href={`/${orgSlug}/projects/${application.projectId}/deployments/${item.id}`}
                   className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.035] px-3 py-3"
                 >
                   <div className="min-w-0">
@@ -866,7 +868,7 @@ export default function ApplicationDetailPage() {
                   <span className="text-xs text-zinc-400">
                     {item.replicas} replicas
                   </span>
-                </div>
+                </Link>
               ))
             ) : (
               <p className="text-sm text-zinc-500">

@@ -1,5 +1,5 @@
 import { applicationPorts, db, deployments, nodes, workloadPorts, workloads } from "@repo/db";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { normalizeAdvertisedAddress, workloadUpstreamUrl } from "./safe-address.js";
 
 export type WorkloadUpstream = { url: string; workloadId: string; nodeId: string };
@@ -53,7 +53,8 @@ export async function resolveWorkloadUpstreams(target: WorkloadUpstreamTarget): 
     .from(workloads)
     .innerJoin(nodes, eq(workloads.nodeId, nodes.id))
     .innerJoin(workloadPorts, and(eq(workloadPorts.workloadId, workloads.id), eq(workloadPorts.containerPort, target.targetPort), eq(workloadPorts.protocol, "tcp"), eq(workloadPorts.exposure, "public")))
-    .where(eq(workloads.deploymentId, deployment.id));
+    .where(eq(workloads.deploymentId, deployment.id))
+    .orderBy(asc(workloads.id));
 
   return candidates.flatMap((candidate) => {
     if (candidate.organizationId !== null && candidate.organizationId !== target.organizationId) return [];

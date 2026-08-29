@@ -31,6 +31,12 @@ export const permissionRegistry = [
   ["applications.delete", "Anwendungen", "Anwendungen löschen", "Anwendungen löschen."],
   ["applications.archive", "Anwendungen", "Anwendungen archivieren", "Anwendungen archivieren und wiederherstellen."],
   ["deployments.create", "Deployments", "Deployments erstellen", "Application-Konfiguration als Deployment ausrollen."],
+  ["deployments.read", "Deployments", "Deployments lesen", "Deployment-Historie, Snapshots und Laufzeitstatus anzeigen."],
+  ["deployments.start", "Deployments", "Deployments starten", "Gestoppte Deployment-Revisionen starten."],
+  ["deployments.stop", "Deployments", "Deployments stoppen", "Deployment-Workloads geordnet stoppen."],
+  ["deployments.restart", "Deployments", "Deployments neu starten", "Deployment-Workloads neu erstellen."],
+  ["deployments.redeploy", "Deployments", "Deployments erneut ausrollen", "Aus einem unveraenderlichen Snapshot eine neue Revision erstellen."],
+  ["deployments.rollback", "Deployments", "Deployments zurueckrollen", "Aus einer frueheren unveraenderlichen Revision eine neue Rollback-Revision erstellen."],
   ["secrets.read_metadata", "Secrets", "Secret-Metadaten lesen", "Secret-Namen und Attachments ohne Werte anzeigen."],
   ["secrets.attach", "Secrets", "Secrets anhängen", "Secrets an Applications anhängen oder entfernen."],
   ["volumes.manage", "Volumes", "Volume-Mounts verwalten", "Application-Volume-Mounts verwalten."],
@@ -48,9 +54,9 @@ export const allPermissions = permissionRegistry.map(([key]) => key) as Permissi
 const systemPermissions: Record<string, readonly Permission[]> = {
   owner: allPermissions,
   admin: allPermissions.filter((permission) => !["organization.delete"].includes(permission)),
-  developer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "applications.archive", "deployments.create", "secrets.read_metadata", "secrets.attach", "volumes.manage", "builds.read", "builds.create", "builds.cancel"],
-  member: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "applications.archive", "deployments.create", "secrets.read_metadata", "secrets.attach", "volumes.manage", "builds.read", "builds.create", "builds.cancel"],
-  viewer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "applications.read", "builds.read", "nodes.read", "audit.read"],
+  developer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "applications.archive", "deployments.create", "deployments.read", "deployments.start", "deployments.stop", "deployments.restart", "deployments.redeploy", "deployments.rollback", "secrets.read_metadata", "secrets.attach", "volumes.manage", "builds.read", "builds.create", "builds.cancel"],
+  member: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "projects.create", "projects.update", "projects.archive", "projects.manage_environments", "applications.read", "applications.create", "applications.update", "applications.archive", "deployments.create", "deployments.read", "deployments.start", "deployments.stop", "deployments.restart", "deployments.redeploy", "secrets.read_metadata", "secrets.attach", "volumes.manage", "builds.read", "builds.create", "builds.cancel"],
+  viewer: ["organization.read", "members.read", "roles.read", "teams.read", "projects.read", "applications.read", "deployments.read", "builds.read", "nodes.read", "audit.read"],
 };
 
 export async function resolveRolePermissions(role: string, organizationId?: string): Promise<Permission[]> {

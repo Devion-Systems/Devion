@@ -4,7 +4,7 @@ import type { WorkloadMetricSample, WorkloadMetricsProvider } from "./provider.j
 
 export class PostgresWorkloadMetricsProvider implements WorkloadMetricsProvider {
   async write(samples: WorkloadMetricSample[]): Promise<void> {
-    if (samples.length) await db.insert(workloadMetrics).values(samples);
+    if (samples.length) await db.insert(workloadMetrics).values(samples).onConflictDoNothing();
   }
   async query(workloadIds: string[], from: Date, to: Date, bucketMs?: number): Promise<WorkloadMetricSample[]> {
     if (!workloadIds.length) return [];

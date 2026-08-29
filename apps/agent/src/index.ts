@@ -70,7 +70,7 @@ const startPayload = z.object({
     })
     .default({}),
 });
-const runtime = new ContainerRuntime(config.DOCKER_SOCKET_PATH);
+const runtime = new ContainerRuntime(config.DOCKER_SOCKET_PATH, config.DEVION_AGENT_REQUEST_TIMEOUT_MS);
 const minecraftCommandPayload = z.object({ command: z.string().trim().min(1).max(1_024) });
 const minecraftLogsPayload = z.object({ tail: z.number().int().min(1).max(2_000).default(500) });
 const minecraftFilePath = z.string().min(1).max(240).refine(
@@ -234,6 +234,10 @@ async function reportWorkloadTelemetry(identity: z.infer<typeof identitySchema>,
 async function reportWorkloadMetrics(identity: z.infer<typeof identitySchema>, assignments: Assignment[]): Promise<void> {
   const now = Date.now();
   if (now - lastMetricsReportAt < config.DEVION_AGENT_METRICS_INTERVAL_MS) return;
+  const assignedWorkloads = new Set(assignments.map((assignment) => assignment.workloadId));
+  for (const workloadId of previousCpu.keys()) {
+    if (!assignedWorkloads.has(workloadId)) previousCpu.delete(workloadId);
+  }
   const samples = (await mapWithConcurrency(assignments, 8, async (assignment) => {
     const stats = await runtime.metrics(assignment.workloadId);
     if (!stats) return null;

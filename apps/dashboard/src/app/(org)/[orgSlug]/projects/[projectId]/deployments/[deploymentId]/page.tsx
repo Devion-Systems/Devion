@@ -1,26 +1,30 @@
-import { CapabilityNotice } from "@/components/layout/capability-notice";
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Play, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { useParams } from "next/navigation";
+import type { ReactNode } from "react";
 import { PageHeader } from "@/components/layout/page-header";
-import { TerminalLogViewer } from "@/components/ui/terminal-log-viewer";
+import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
+import { Button } from "@/components/ui/button";
+
+type Detail = { deployment: { id: string; version: number; status: string; image: string; createdAt: string; commitSha: string | null; failureReason: string | null; configurationSnapshot: unknown }; application: { name: string }; workloads: Array<{ id: string; nodeId: string | null; actualState: string; healthStatus: string; restartCount: number }>; events: Array<{ id: string; type: string; message: string; reason: string | null; createdAt: string }>; secretPolicy: string };
+type Metrics = { samples: Array<{ cpuAverage: number | null; memoryAverageBytes: number }> };
+type Logs = { workloads: Array<{ workloadId: string; status: string; logs: string }> };
+const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 
 export default function DeploymentDetailPage() {
-  return (
-    <div className="space-y-6 p-5 sm:p-7">
-      <PageHeader
-        title="Deployment"
-        description="Status, Artefakte und Build-Ausgaben dieses Releases."
-      />
-      <CapabilityNotice
-        title="Deployment noch nicht verfügbar"
-        description="Commit und Status werden ergänzt, sobald der Deployment-Service reale Ereignisse speichert."
-      />
-      <div>
-        <h2 className="mb-3 text-sm font-semibold text-zinc-200">Build-Logs</h2>
-        <TerminalLogViewer
-          ariaLabel="Deployment-Build-Logs"
-          emptyMessage="Warte auf Build-Ausgaben des Deployment-Service …"
-          fileName="deployment-build-logs.txt"
-        />
-      </div>
-    </div>
-  );
+  const { orgSlug, projectId, deploymentId } = useParams<{ orgSlug: string; projectId: string; deploymentId: string }>();
+  const client = useQueryClient();
+  const base = `/organizations/${orgSlug}/projects/${projectId}/deployments/${deploymentId}`;
+  const detail = useQuery<Detail>({ queryKey: ["deployment", deploymentId], enabled: Boolean(deploymentId), refetchInterval: 10_000, queryFn: () => get(`${base}`) });
+  const metrics = useQuery<Metrics>({ queryKey: ["deployment", deploymentId, "metrics"], enabled: Boolean(deploymentId), refetchInterval: 15_000, queryFn: () => get(`${base}/metrics?range=1h`) });
+  const logs = useQuery<Logs>({ queryKey: ["deployment", deploymentId, "logs"], enabled: Boolean(deploymentId), refetchInterval: 10_000, queryFn: () => get(`${base}/logs?tail=300`) });
+  const action = useMutation({ mutationFn: async (name: "start" | "stop" | "restart" | "redeploy" | "rollback") => { if (name === "rollback" && !window.confirm("Eine neue Revision aus diesem Snapshot erstellen?")) return; return get(`${base}/${name}`, "POST"); }, onSuccess: () => void client.invalidateQueries({ queryKey: ["deployment", deploymentId] }) });
+  const data = detail.data; const latestMetric = metrics.data?.samples.at(-1);
+  return <div className="space-y-6 p-5 sm:p-7"><PageHeader title={data ? `${data.application.name} · v${data.deployment.version}` : "Deployment"} description="Unveränderlicher Snapshot, Laufzeitstatus und Ereignisse dieser Revision." primaryAction={<Actions mutate={action.mutate} />} />
+    {detail.isLoading ? <p className="text-sm text-zinc-400">Deployment wird geladen …</p> : detail.isError ? <div className="rounded-lg border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{detail.error.message}</div> : data ? <><div className="grid gap-4 md:grid-cols-4"><Info label="Status"><ResourceStatusBadge status={data.deployment.status} /></Info><Info label="Artefakt"><span className="break-all font-mono text-xs">{data.deployment.image}</span></Info><Info label="Commit"><span className="font-mono text-xs">{data.deployment.commitSha ?? "–"}</span></Info><Info label="Erstellt">{new Date(data.deployment.createdAt).toLocaleString("de-DE")}</Info></div>{data.deployment.failureReason && <div className="rounded-lg border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{data.deployment.failureReason}</div>}<section className="rounded-xl border border-zinc-800 p-4"><h2 className="font-medium text-zinc-100">Workloads ({data.workloads.length})</h2><div className="mt-3 space-y-2">{data.workloads.length ? data.workloads.map(w => <div key={w.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-zinc-900/70 px-3 py-2 text-sm"><span className="font-mono text-xs text-zinc-400">{w.id}</span><span>{w.nodeId ?? "Nicht zugewiesen"}</span><ResourceStatusBadge status={w.actualState} /><span className="text-xs text-zinc-500">Health: {w.healthStatus} · Neustarts: {w.restartCount}</span></div>) : <p className="text-sm text-zinc-500">Noch keine Workloads zugewiesen.</p>}</div></section><section className="grid gap-4 md:grid-cols-2"><div className="rounded-xl border border-zinc-800 p-4"><h2 className="font-medium text-zinc-100">Metriken (1 h)</h2><p className="mt-2 text-sm text-zinc-400">{latestMetric ? `CPU ${latestMetric.cpuAverage?.toFixed(1) ?? "–"}% · Speicher ${(latestMetric.memoryAverageBytes / 1024 / 1024).toFixed(1)} MiB` : "Noch keine Metrikdaten."}</p></div><div className="rounded-xl border border-zinc-800 p-4"><h2 className="font-medium text-zinc-100">Logs</h2>{logs.data?.workloads.length ? logs.data.workloads.map(log => <pre key={log.workloadId} className="mt-2 max-h-48 overflow-auto rounded bg-zinc-950 p-2 text-xs text-zinc-300">{log.logs || "Warte auf Agent-Antwort …"}</pre>) : <p className="mt-2 text-sm text-zinc-500">Logs werden vom Agenten angefordert.</p>}</div></section><section className="rounded-xl border border-zinc-800 p-4"><h2 className="font-medium text-zinc-100">Ereignisse</h2><div className="mt-3 space-y-3">{data.events.length ? data.events.map(e => <div key={e.id} className="border-l border-zinc-700 pl-3"><p className="text-sm text-zinc-200">{e.message}</p>{e.reason && <p className="text-xs text-red-300">{e.reason}</p>}<p className="text-xs text-zinc-500">{e.type} · {new Date(e.createdAt).toLocaleString("de-DE")}</p></div>) : <p className="text-sm text-zinc-500">Keine Ereignisse vorhanden.</p>}</div></section><section className="rounded-xl border border-zinc-800 p-4"><h2 className="font-medium text-zinc-100">Immutable Snapshot</h2><p className="mt-1 text-xs text-zinc-500">{data.secretPolicy}</p><pre className="mt-3 max-h-80 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-300">{JSON.stringify(data.deployment.configurationSnapshot, null, 2)}</pre></section></> : null}</div>;
 }
+async function get(path: string, method = "GET") { const response = await fetch(api(path), { method, credentials: "include" }); if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? "Anfrage fehlgeschlagen"); return response.json(); }
+function Actions({ mutate }: { mutate: (action: "start" | "stop" | "restart" | "redeploy" | "rollback") => void }) { return <div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => mutate("start")}><Play className="mr-1 size-4" />Start</Button><Button size="sm" variant="outline" onClick={() => mutate("stop")}><Square className="mr-1 size-4" />Stop</Button><Button size="sm" variant="outline" onClick={() => mutate("restart")}><RefreshCw className="mr-1 size-4" />Restart</Button><Button size="sm" variant="outline" onClick={() => mutate("redeploy")}>Redeploy</Button><Button size="sm" variant="outline" onClick={() => mutate("rollback")}><RotateCcw className="mr-1 size-4" />Rollback</Button></div>; }
+function Info({ label, children }: { label: string; children: ReactNode }) { return <div className="rounded-xl border border-zinc-800 p-4"><p className="text-xs uppercase tracking-wide text-zinc-500">{label}</p><div className="mt-2 text-sm text-zinc-200">{children}</div></div>; }

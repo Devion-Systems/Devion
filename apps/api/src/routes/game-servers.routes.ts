@@ -4,6 +4,7 @@ import {
   agentCommands,
   db,
   deployments,
+  deploymentEvents,
   gameServerAccess,
   gameServers,
   member,
@@ -232,7 +233,17 @@ routes.post("/:orgSlug/game-servers", async (c) => {
         ports: [{ containerPort: 25565 }],
         volumes: [{ name: `${containerName}-data`, target: "/data" }],
       },
+      configurationSnapshot: {
+        source: { type: "image", image },
+        runtime: "container",
+        resources: { cpuMilli: 1_000, memoryMib: parsed.data.memoryMib, storageMib: 0 },
+        ports: [{ containerPort: 25565 }],
+        volumes: [{ name: `${containerName}-data`, target: "/data" }],
+        environmentKeys: ["EULA", "VERSION", "MOTD", "MEMORY", "ENABLE_RCON", "RCON_PASSWORD"],
+      },
+      status: "queued",
     });
+    await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId, type: "deployment.created", message: "Game server deployment revision v1 created" });
   });
   await reconcileDeployment(deploymentId);
   return c.json({ id: serverId, applicationId, deploymentId, status: "provisioning" }, 202);

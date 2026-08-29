@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { normalizeAdvertisedAddress } from "../../features/routing/safe-address.js";
 
 export type TraefikDomain = {
   id: string;
@@ -28,6 +29,13 @@ function assertHostname(hostname: string) {
   return normalized;
 }
 
+function hasExplicitPort(url: string): boolean {
+  const authority = url.slice(url.indexOf("//") + 2).split(/[/?#]/, 1)[0] ?? "";
+  return authority.startsWith("[")
+    ? /^\[[^\]]+\]:\d+$/.test(authority)
+    : /^[^:]+:\d+$/.test(authority);
+}
+
 function assertUpstream(url: string) {
   const parsed = new URL(url);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -42,6 +50,10 @@ function assertUpstream(url: string) {
   ) {
     throw new Error("Traefik upstream must be a bare internal service URL");
   }
+  // `new URL()` intentionally normalizes :80 and :443 away, so check the
+  // original authority rather than `parsed.port`.
+  if (!hasExplicitPort(url)) throw new Error("Traefik upstream must include an explicit workload port");
+  normalizeAdvertisedAddress(parsed.hostname.replace(/^\[|\]$/g, ""));
   return parsed.toString().replace(/\/$/, "");
 }
 
@@ -75,13 +87,13 @@ export class TraefikManager {
     const routers: Record<string, unknown> = {};
     const services: Record<string, unknown> = {};
 
-    for (const domain of domains) {
+    for (const domain of [...domains].sort((left, right) => left.hostname.localeCompare(right.hostname) || left.id.localeCompare(right.id))) {
       if (domain.upstreams.length === 0) continue;
       const serviceName = `domain-${projectKey}-${safeIdentifier(domain.id)}`;
       const hostname = assertHostname(domain.hostname);
       const routeKey = `${projectKey}-${safeIdentifier(domain.id)}`;
       services[serviceName] = {
-        loadBalancer: { servers: domain.upstreams.map((upstream) => ({ url: assertUpstream(upstream.url) })) },
+        loadBalancer: { servers: [...domain.upstreams].sort((left, right) => left.url.localeCompare(right.url)).map((upstream) => ({ url: assertUpstream(upstream.url) })) },
       };
       const httpsRouter: Record<string, unknown> = {
         rule: `Host(\`${hostname}\`)`,

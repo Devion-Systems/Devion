@@ -1,6 +1,6 @@
-import { bigint, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, bigint, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
-import { applications, projects } from "./projects.js";
+import { applications, projectEnvironments, projects } from "./projects.js";
 import { user } from "./auth.js";
 
 /** API-owned immutable build history. Builder runs are execution details only. */
@@ -112,6 +112,7 @@ export const deployments = pgTable(
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id").references(() => projectEnvironments.id, { onDelete: "set null" }),
     version: integer("version").notNull(),
     image: text("image").notNull(),
     replicas: integer("replicas").notNull(),
@@ -121,13 +122,22 @@ export const deployments = pgTable(
     runtimeConfig: jsonb("runtime_config").notNull().default({}),
     /** Immutable effective configuration used to create this deployment. */
     configurationSnapshot: jsonb("configuration_snapshot"),
+    status: text("status", { enum: ["queued", "scheduling", "starting", "running", "degraded", "failed", "stopping", "stopped", "superseded"] }).notNull().default("queued"),
+    failureReason: text("failure_reason"),
+    rollbackFromDeploymentId: text("rollback_from_deployment_id").references((): AnyPgColumn => deployments.id, { onDelete: "restrict" }),
     buildId: text("build_id").references(() => builds.id, { onDelete: "restrict" }),
     commitSha: text("commit_sha"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+    failedAt: timestamp("failed_at"),
   },
   (table) => [
     index("deployments_application_idx").on(table.applicationId, table.createdAt),
+    uniqueIndex("deployments_application_version_uidx").on(table.applicationId, table.version),
+    index("deployments_application_status_idx").on(table.applicationId, table.status),
+    index("deployments_environment_idx").on(table.environmentId),
     uniqueIndex("deployments_build_uidx").on(table.buildId),
   ],
 );
@@ -166,6 +176,22 @@ export const workloads = pgTable(
     index("workloads_deployment_idx").on(table.deploymentId),
     index("workloads_node_idx").on(table.nodeId),
   ],
+);
+
+/** Immutable lifecycle records for one deployment; payloads must never contain secrets. */
+export const deploymentEvents = pgTable(
+  "deployment_events",
+  {
+    id: text("id").primaryKey(),
+    deploymentId: text("deployment_id").notNull().references(() => deployments.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    message: text("message").notNull(),
+    workloadId: text("workload_id").references(() => workloads.id, { onDelete: "set null" }),
+    nodeId: text("node_id").references(() => nodes.id, { onDelete: "set null" }),
+    reason: text("reason"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("deployment_events_deployment_created_idx").on(table.deploymentId, table.createdAt)],
 );
 
 /** Observed Docker host-port bindings; refreshed by the agent and never user writable. */
@@ -208,6 +234,7 @@ export const workloadMetrics = pgTable(
   },
   (table) => [
     index("workload_metrics_workload_recorded_idx").on(table.workloadId, table.recordedAt),
+    uniqueIndex("workload_metrics_workload_recorded_uidx").on(table.workloadId, table.recordedAt),
     index("workload_metrics_node_recorded_idx").on(table.nodeId, table.recordedAt),
   ],
 );
