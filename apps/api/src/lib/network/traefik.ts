@@ -4,12 +4,11 @@ import path from "node:path";
 export type TraefikDomain = {
   id: string;
   hostname: string;
+  upstreams: Array<{ url: string }>;
 };
 
 export type ProjectRouteTarget = {
   projectId: string;
-  projectSlug: string;
-  targetUrl: string;
 };
 
 export type TraefikSettings = {
@@ -73,39 +72,26 @@ export class TraefikManager {
   /** Reconciles every hostname of a project into one atomically-written file. */
   async syncProjectRoutes(target: ProjectRouteTarget, domains: TraefikDomain[]): Promise<void> {
     const projectKey = safeIdentifier(target.projectId);
-    const serviceName = `project-${projectKey}`;
-    const targetUrl = assertUpstream(target.targetUrl);
-    const hostnames = [
-      ...domains.map((domain) => ({
-        id: safeIdentifier(domain.id),
-        hostname: assertHostname(domain.hostname),
-        useCertificateResolver: true,
-      })),
-      ...(this.settings.internalDomain
-        ? [
-            {
-              id: "internal",
-              hostname: assertHostname(
-                `${safeIdentifier(target.projectSlug)}.${this.settings.internalDomain}`,
-              ),
-              useCertificateResolver: false,
-            },
-          ]
-        : []),
-    ];
     const routers: Record<string, unknown> = {};
+    const services: Record<string, unknown> = {};
 
-    for (const domain of hostnames) {
-      const routeKey = `${projectKey}-${domain.id}`;
+    for (const domain of domains) {
+      if (domain.upstreams.length === 0) continue;
+      const serviceName = `domain-${projectKey}-${safeIdentifier(domain.id)}`;
+      const hostname = assertHostname(domain.hostname);
+      const routeKey = `${projectKey}-${safeIdentifier(domain.id)}`;
+      services[serviceName] = {
+        loadBalancer: { servers: domain.upstreams.map((upstream) => ({ url: assertUpstream(upstream.url) })) },
+      };
       const httpsRouter: Record<string, unknown> = {
-        rule: `Host(\`${domain.hostname}\`)`,
+        rule: `Host(\`${hostname}\`)`,
         entryPoints: [this.settings.httpsEntryPoint],
         service: serviceName,
-        tls: domain.useCertificateResolver ? { certResolver: this.settings.certResolver } : {},
+        tls: { certResolver: this.settings.certResolver },
       };
       routers[`https-${routeKey}`] = httpsRouter;
       routers[`http-${routeKey}`] = {
-        rule: `Host(\`${domain.hostname}\`)`,
+        rule: `Host(\`${hostname}\`)`,
         entryPoints: [this.settings.httpEntryPoint],
         middlewares: ["redirect-to-https"],
         service: serviceName,
@@ -118,7 +104,7 @@ export class TraefikManager {
           "redirect-to-https": { redirectScheme: { scheme: "https", permanent: true } },
         },
         routers,
-        services: { [serviceName]: { loadBalancer: { servers: [{ url: targetUrl }] } } },
+        services,
       },
     });
   }

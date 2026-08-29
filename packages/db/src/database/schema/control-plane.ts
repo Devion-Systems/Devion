@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { applications, projects } from "./projects.js";
 import { user } from "./auth.js";
@@ -47,7 +47,13 @@ export const nodes = pgTable(
     organizationId: text("organization_id")
       .references(() => organization.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /**
+     * Management identity reported during enrollment. This is never used as a
+     * network route because it can be a Docker hostname or otherwise private.
+     */
     hostname: text("hostname").notNull(),
+    /** Explicit, operator-configured address reachable by the Traefik hosts. */
+    advertisedAddress: text("advertised_address"),
     status: text("status", {
       enum: ["provisioning", "ready", "draining", "offline", "unhealthy", "decommissioned"],
     })
@@ -162,6 +168,50 @@ export const workloads = pgTable(
   ],
 );
 
+/** Observed Docker host-port bindings; refreshed by the agent and never user writable. */
+export const workloadPorts = pgTable(
+  "workload_ports",
+  {
+    workloadId: text("workload_id").notNull().references(() => workloads.id, { onDelete: "cascade" }),
+    containerPort: integer("container_port").notNull(),
+    hostPort: integer("host_port").notNull(),
+    protocol: text("protocol", { enum: ["tcp", "udp"] }).notNull(),
+    exposure: text("exposure", { enum: ["private", "public"] }).notNull(),
+    observedAt: timestamp("observed_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("workload_ports_workload_container_protocol_uidx").on(table.workloadId, table.containerPort, table.protocol),
+    index("workload_ports_workload_idx").on(table.workloadId),
+  ],
+);
+
+/**
+ * Append-only measurements from the agent's local container runtime. Counters
+ * remain raw; the API derives reset-aware rates for callers.
+ */
+export const workloadMetrics = pgTable(
+  "workload_metrics",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    workloadId: text("workload_id").notNull().references(() => workloads.id, { onDelete: "cascade" }),
+    nodeId: text("node_id").notNull().references(() => nodes.id, { onDelete: "cascade" }),
+    recordedAt: timestamp("recorded_at").notNull(),
+    /** CPU percent relative to the workload's assigned CPU limit; null until a delta exists. */
+    cpuUsagePercent: real("cpu_usage_percent"),
+    memoryUsageBytes: bigint("memory_usage_bytes", { mode: "number" }).notNull(),
+    memoryLimitBytes: bigint("memory_limit_bytes", { mode: "number" }),
+    networkRxBytes: bigint("network_rx_bytes", { mode: "number" }).notNull(),
+    networkTxBytes: bigint("network_tx_bytes", { mode: "number" }).notNull(),
+    diskReadBytes: bigint("disk_read_bytes", { mode: "number" }).notNull(),
+    diskWriteBytes: bigint("disk_write_bytes", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("workload_metrics_workload_recorded_idx").on(table.workloadId, table.recordedAt),
+    index("workload_metrics_node_recorded_idx").on(table.nodeId, table.recordedAt),
+  ],
+);
+
 /** Durable commands make delivery/retry observable and idempotent via command id. */
 export const agentCommands = pgTable(
   "agent_commands",
@@ -177,6 +227,9 @@ export const agentCommands = pgTable(
     status: text("status", { enum: ["pending", "delivered", "succeeded", "failed"] })
       .notNull()
       .default("pending"),
+    /** A delivery lease prevents repeat execution while still allowing recovery after an agent crash. */
+    deliveredAt: timestamp("delivered_at"),
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     result: jsonb("result"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),

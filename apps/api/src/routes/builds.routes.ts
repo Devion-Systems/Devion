@@ -1,4 +1,4 @@
-import { applicationEnvironmentVariables, applicationPorts, applicationResourceConfigurations, applicationRuntimeConfigurations, applicationSecretAttachments, applicationVolumeMounts, applications, auditLogs, builds, db, deployments, environmentVariables } from "@repo/db";
+import { applicationEnvironmentVariables, applicationPorts, applicationResourceConfigurations, applicationRuntimeConfigurations, applicationSecretAttachments, applicationVolumeMounts, applications, auditLogs, builds, db, deployments, environmentVariables, projectEnvironments } from "@repo/db";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { isIP } from "node:net";
@@ -53,9 +53,23 @@ async function createBuild(input: { app: typeof applications.$inferSelect; organ
   ]);
   const environmentValues = input.app.defaultEnvironmentId ? await db.select().from(environmentVariables).where(and(eq(environmentVariables.environmentId, input.app.defaultEnvironmentId), eq(environmentVariables.isSecret, false))) : [];
   const environment = Object.fromEntries(await Promise.all(environmentValues.map(async (variable) => [variable.key, await decryptEnvironmentValue(variable.valueEncrypted)] as const)));
+  const gitCredential = input.app.gitCredentialReference
+    ? await db
+        .select({ valueEncrypted: environmentVariables.valueEncrypted })
+        .from(environmentVariables)
+        .innerJoin(projectEnvironments, eq(environmentVariables.environmentId, projectEnvironments.id))
+        .where(and(eq(environmentVariables.id, input.app.gitCredentialReference), eq(environmentVariables.isSecret, true), eq(projectEnvironments.projectId, input.projectId)))
+        .limit(1)
+    : [];
+  if (input.app.gitCredentialReference && !gitCredential[0]) throw new Error("Configured Git credential is no longer available in this project");
+  const buildSecrets: Record<string, string> = gitCredential[0]
+    ? { GIT_TOKEN: await decryptEnvironmentValue(gitCredential[0].valueEncrypted) }
+    : {};
   for (const variable of applicationVariables.filter((value) => value.environmentId === null || value.environmentId === input.app.defaultEnvironmentId)) environment[variable.key] = await decryptEnvironmentValue(variable.valueEncrypted);
   const requirements = { cpuMilli: input.deployment.cpuMilli ?? resourceDefaults?.cpuMilli ?? 250, memoryMib: input.deployment.memoryMib ?? resourceDefaults?.memoryMib ?? 256, storageMib: input.deployment.storageMib ?? resourceDefaults?.storageMib ?? 0, runtime: "container" as const };
   const replicas = input.deployment.replicas ?? runtimeDefaults?.replicas ?? 1;
+  if (volumes.some((volume) => !volume.readOnly) && replicas > 1)
+    throw new Error("Writable local volumes require a single replica until shared storage is configured");
   const configured = input.app.buildConfiguration as { dockerfile?: string; context?: string; target?: string; args?: Record<string, string> };
   const buildConfiguration = {
     strategy: "dockerfile",
@@ -65,13 +79,13 @@ async function createBuild(input: { app: typeof applications.$inferSelect; organ
     args: configured.args ?? {},
     deployment: { enabled: input.trigger !== "build", replicas },
     requirements,
-    runtimeConfig: { environment, ports: (ports.length ? ports : [{ internalPort: input.app.internalPort, protocol: "tcp", exposure: "private" }]).map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure })), volumes: volumes.map((volume) => ({ name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })), restartPolicy: runtimeDefaults?.restartPolicy ?? "unless-stopped", gracefulShutdownSeconds: runtimeDefaults?.gracefulShutdownSeconds ?? 15, ...(runtimeDefaults?.command ? { command: runtimeDefaults.command } : {}), ...(runtimeDefaults?.workingDirectory ? { workingDirectory: runtimeDefaults.workingDirectory } : {}), ...(runtimeDefaults?.healthcheckCommand ? { healthCheck: { command: runtimeDefaults.healthcheckCommand, intervalSeconds: runtimeDefaults.healthcheckIntervalSeconds, timeoutSeconds: runtimeDefaults.healthcheckTimeoutSeconds, retries: runtimeDefaults.healthcheckRetries, startPeriodSeconds: runtimeDefaults.healthcheckStartPeriodSeconds } } : {}) },
+    runtimeConfig: { environment, ports: (ports.length ? ports : [{ internalPort: input.app.internalPort, protocol: "tcp", exposure: "private", externalPort: null }]).map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure, ...(port.externalPort ? { externalPort: port.externalPort } : {}) })), volumes: volumes.map((volume) => ({ name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })), restartPolicy: runtimeDefaults?.restartPolicy ?? "unless-stopped", gracefulShutdownSeconds: runtimeDefaults?.gracefulShutdownSeconds ?? 15, ...(runtimeDefaults?.command ? { command: runtimeDefaults.command } : {}), ...(runtimeDefaults?.workingDirectory ? { workingDirectory: runtimeDefaults.workingDirectory } : {}), ...(runtimeDefaults?.healthcheckCommand ? { healthCheck: { command: runtimeDefaults.healthcheckCommand, intervalSeconds: runtimeDefaults.healthcheckIntervalSeconds, timeoutSeconds: runtimeDefaults.healthcheckTimeoutSeconds, retries: runtimeDefaults.healthcheckRetries, startPeriodSeconds: runtimeDefaults.healthcheckStartPeriodSeconds } } : {}) },
     configurationSnapshot: { source: { type: "git", repository: repositoryUrl, branch: input.app.branch }, build: { strategy: "dockerfile", dockerfile: configured.dockerfile ?? null, context: configured.context ?? input.app.rootDirectory }, runtime: runtimeDefaults ?? { runtime: "container", replicas, restartPolicy: "unless-stopped", gracefulShutdownSeconds: 15 }, resources: requirements, ports, volumes, environmentId: input.app.defaultEnvironmentId ?? null, environmentKeys: Object.keys(environment), applicationVariableKeys: applicationVariables.map((variable) => ({ key: variable.key, environmentId: variable.environmentId })), secretReferences: secretAttachments },
   };
   await db.insert(builds).values({ id: buildId, organizationId: input.organizationId, projectId: input.projectId, applicationId: input.app.id, triggeredBy: input.userId, trigger: input.trigger, retryOfBuildId: input.retryOfBuildId, repositoryUrl, repositoryProvider: input.app.repositoryProvider, branch: input.app.branch, buildConfiguration, imageRepository, imageTag });
   try {
     const builderRepository = `${builderPrefix}/${input.organizationId}/${input.projectId}/${input.app.id}`.toLowerCase();
-    const run = await createBuilderRun({ buildId, repository: repositoryUrl, ref: input.app.branch, rootDirectory: buildConfiguration.context, dockerfile: buildConfiguration.dockerfile, target: buildConfiguration.target, buildArgs: buildConfiguration.args, image: `${builderRepository}:${imageTag}`, insecureRegistry: process.env.DEVION_BUILDER_REGISTRY_INSECURE === "true" });
+    const run = await createBuilderRun({ buildId, repository: repositoryUrl, ref: input.app.branch, rootDirectory: buildConfiguration.context, dockerfile: buildConfiguration.dockerfile, target: buildConfiguration.target, buildArgs: buildConfiguration.args, image: `${builderRepository}:${imageTag}`, insecureRegistry: process.env.DEVION_BUILDER_REGISTRY_INSECURE === "true", secrets: buildSecrets });
     await db.update(builds).set({ status: "queued", builderJobId: run.id, queuedAt: new Date(run.createdAt) }).where(eq(builds.id, buildId));
   } catch (error) {
     await db.update(builds).set({ status: "failed", errorCode: "BUILDER_UNAVAILABLE", errorMessage: error instanceof Error ? error.message : "Builder unavailable", completedAt: new Date() }).where(eq(builds.id, buildId));

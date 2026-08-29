@@ -17,6 +17,8 @@ export function scheduleWorkload(
     if (requirements.architecture && node.architecture !== requirements.architecture)
       reasons.push("architecture-mismatch");
     if (requirements.region && node.region !== requirements.region) reasons.push("region-mismatch");
+    if (requirements.requiredNodeId && node.id !== requirements.requiredNodeId)
+      reasons.push("node-affinity-mismatch");
     for (const [key, value] of Object.entries(requirements.requiredLabels ?? {})) {
       if (node.labels[key] !== value) reasons.push(`label-mismatch:${key}`);
     }

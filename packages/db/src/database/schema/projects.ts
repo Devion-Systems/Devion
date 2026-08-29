@@ -89,6 +89,16 @@ export const projectDomains = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    /** A domain always selects a server-owned application target, never a URL. */
+    applicationId: text("application_id").references(() => applications.id, { onDelete: "cascade" }),
+    /** Optional immutable deployment version; otherwise the newest running one is selected. */
+    deploymentId: text("deployment_id"),
+    targetPort: integer("target_port"),
+    upstreamProtocol: text("upstream_protocol", { enum: ["http", "https"] }),
+    /** Legacy records retain their last file-provider config until explicitly retargeted. */
+    routingMigrationState: text("routing_migration_state", { enum: ["target", "legacy"] })
+      .notNull()
+      .default("target"),
     hostname: text("hostname").notNull(),
     environment: text("environment").default("production").notNull(),
     status: text("status", { enum: ["pending", "active", "failed"] })
@@ -137,6 +147,7 @@ export const applications = pgTable(
     buildConfiguration: jsonb("build_configuration").$type<Record<string, unknown>>().default({}).notNull(),
     autoDeployEnabled: boolean("auto_deploy_enabled").default(false).notNull(),
     gitCredentialReference: text("git_credential_reference"),
+    registryCredentialReference: text("registry_credential_reference"),
     lastKnownCommit: text("last_known_commit"),
     /** Lifecycle is deliberately separate from deployment/workload health. */
     lifecycleStatus: text("lifecycle_status", { enum: ["active", "archived"] })

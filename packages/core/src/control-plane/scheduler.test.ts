@@ -37,6 +37,15 @@ test("scheduler rejects ineligible nodes before scoring", () => {
   expect(decision).toEqual({ nodeId: "eligible", reasons: ["eligible", "balanced-load"] });
 });
 
+test("scheduler honours persistent-volume node affinity", () => {
+  const decision = scheduleWorkload(
+    [node("pinned"), node("other")],
+    { ...requirements, requiredNodeId: "pinned" },
+  );
+  expect(decision.nodeId).toBe("pinned");
+  expect(scheduleWorkload([node("other")], { ...requirements, requiredNodeId: "pinned" }).reasons).toContain("no-eligible-node");
+});
+
 test("scheduler provides a deterministic no-placement result", () => {
   expect(
     scheduleWorkload(

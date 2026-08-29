@@ -1,13 +1,14 @@
 import postgres from "postgres";
 import type { BuildRun, LogEntry } from "./domain.ts";
 import type { CreateRunInput, RunRepository } from "./repository.ts";
+import { decryptRunSecrets, encryptRunSecrets } from "./secrets.ts";
 
 type Sql = ReturnType<typeof postgres>;
 type JsonValue = Parameters<Sql["json"]>[0];
 type Row = Record<string, unknown>;
 
 export class PostgresRunRepository implements RunRepository {
-  constructor(private readonly sql: Sql) {}
+  constructor(private readonly sql: Sql, private readonly secretEncryptionKey: string) {}
 
   async migrate(): Promise<void> {
     await this.sql.unsafe(await Bun.file(new URL("../migrations/001_init.sql", import.meta.url)).text());
@@ -17,21 +18,21 @@ export class PostgresRunRepository implements RunRepository {
     const id = crypto.randomUUID();
     const rows = await this.sql`
       INSERT INTO builder_runs (id, workflow, source, inputs, secrets, idempotency_key)
-      VALUES (${id}, ${this.sql.json(jsonValue(input.workflow))}, ${this.sql.json(jsonValue(input.source))}, ${this.sql.json(input.inputs)}, ${this.sql.json(input.secrets)}, ${input.idempotencyKey})
+      VALUES (${id}, ${this.sql.json(jsonValue(input.workflow))}, ${this.sql.json(jsonValue(input.source))}, ${this.sql.json(input.inputs)}, ${this.sql.json(await encryptRunSecrets(input.secrets, this.secretEncryptionKey))}, ${input.idempotencyKey})
       ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
       RETURNING *, (xmax = 0) AS inserted`;
     const row = rows[0] as Row;
-    return { run: mapRun(row), created: Boolean(row.inserted) };
+    return { run: await this.mapRun(row), created: Boolean(row.inserted) };
   }
 
   async get(id: string): Promise<BuildRun | null> {
     const rows = await this.sql`SELECT * FROM builder_runs WHERE id = ${id}`;
-    return rows[0] ? mapRun(rows[0] as Row) : null;
+    return rows[0] ? await this.mapRun(rows[0] as Row) : null;
   }
 
   async list(limit: number): Promise<BuildRun[]> {
     const rows = await this.sql`SELECT * FROM builder_runs ORDER BY created_at DESC LIMIT ${limit}`;
-    return rows.map((row) => mapRun(row as Row));
+    return Promise.all(rows.map((row) => this.mapRun(row as Row)));
   }
 
   async claim(workerId: string, leaseSeconds: number): Promise<BuildRun | null> {
@@ -42,7 +43,7 @@ export class PostgresRunRepository implements RunRepository {
       UPDATE builder_runs SET status = 'running', worker_id = ${workerId}, attempt = attempt + 1, started_at = now(), lease_expires_at = now() + (${leaseSeconds} * interval '1 second')
       FROM next_run WHERE builder_runs.id = next_run.id RETURNING builder_runs.*`;
     const row = rows[0];
-    return row ? mapRun(row as Row) : null;
+    return row ? await this.mapRun(row as Row) : null;
   }
 
   async heartbeat(id: string, workerId: string, leaseSeconds: number): Promise<boolean> {
@@ -96,20 +97,20 @@ export class PostgresRunRepository implements RunRepository {
     const rows = await this.sql`SELECT * FROM builder_logs WHERE run_id = ${runId} AND id > ${after} ORDER BY id LIMIT 1000`;
     return rows.map((row) => ({ id: Number(row.id), runId: String(row.run_id), stepId: row.step_id ? String(row.step_id) : null, stream: row.stream as LogEntry["stream"], message: String(row.message), createdAt: new Date(row.created_at as string).toISOString() }));
   }
+
+  private async mapRun(row: Row): Promise<BuildRun> {
+    return {
+      id: String(row.id), workflow: row.workflow as BuildRun["workflow"], source: row.source as BuildRun["source"],
+      inputs: row.inputs as Record<string, string>, secrets: await decryptRunSecrets(row.secrets as Record<string, string>, this.secretEncryptionKey), metadata: (row.metadata ?? { exposedPorts: [], detectedDockerfiles: {} }) as BuildRun["metadata"], status: row.status as BuildRun["status"],
+      attempt: Number(row.attempt), idempotencyKey: String(row.idempotency_key), leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at as string).toISOString() : null, workerId: row.worker_id ? String(row.worker_id) : null, cancelRequested: Boolean(row.cancel_requested), error: row.error ? String(row.error) : null,
+      createdAt: new Date(row.created_at as string).toISOString(), startedAt: row.started_at ? new Date(row.started_at as string).toISOString() : null,
+      finishedAt: row.finished_at ? new Date(row.finished_at as string).toISOString() : null,
+    };
+  }
 }
 
 export function connect(url: string): Sql {
   return postgres(url, { max: 10, idle_timeout: 20 });
-}
-
-function mapRun(row: Row): BuildRun {
-  return {
-    id: String(row.id), workflow: row.workflow as BuildRun["workflow"], source: row.source as BuildRun["source"],
-    inputs: row.inputs as Record<string, string>, secrets: row.secrets as Record<string, string>, metadata: (row.metadata ?? { exposedPorts: [], detectedDockerfiles: {} }) as BuildRun["metadata"], status: row.status as BuildRun["status"],
-    attempt: Number(row.attempt), idempotencyKey: String(row.idempotency_key), leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at as string).toISOString() : null, workerId: row.worker_id ? String(row.worker_id) : null, cancelRequested: Boolean(row.cancel_requested), error: row.error ? String(row.error) : null,
-    createdAt: new Date(row.created_at as string).toISOString(), startedAt: row.started_at ? new Date(row.started_at as string).toISOString() : null,
-    finishedAt: row.finished_at ? new Date(row.finished_at as string).toISOString() : null,
-  };
 }
 
 function jsonValue(value: object): JsonValue {

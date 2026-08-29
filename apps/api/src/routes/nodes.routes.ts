@@ -3,6 +3,7 @@ import type { AgentCommandResult, NodeResources } from "@repo/core";
 import {
   agentCommands,
   applications,
+  auditLogs,
   db,
   deployments,
   environmentVariables,
@@ -11,9 +12,11 @@ import {
   nodeRegistrationTokens,
   nodes,
   organization,
+  projectEnvironments,
+  workloadPorts,
   workloads,
 } from "@repo/db";
-import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auth } from "../features/auth/config.js";
@@ -21,6 +24,9 @@ import { resolveRolePermissions } from "../features/organizations/permissions.js
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import { resolveOrganizationAccess } from "../middleware/organization-policy.js";
 import { decryptEnvironmentValue } from "../features/environments/crypto.js";
+import { normalizeAdvertisedAddress } from "../features/routing/safe-address.js";
+import { PostgresWorkloadMetricsProvider } from "../features/metrics/postgres-provider.js";
+import { reconcileDomainRoutesForNode } from "../features/routing/controller.js";
 import type { AppEnv } from "../types/env.js";
 
 const routes = new Hono<AppEnv>();
@@ -34,6 +40,7 @@ const registerInput = z.object({
   registrationToken: z.string().min(32).max(512),
   name: z.string().trim().min(1).max(100),
   hostname: z.string().trim().min(1).max(253),
+  advertisedAddress: z.string().trim().min(1).max(253).optional(),
   architecture: z.string().trim().min(1).max(64),
   os: z.string().trim().min(1).max(128),
   agentVersion: z.string().trim().min(1).max(64),
@@ -56,7 +63,7 @@ const heartbeatInput = z.object({
     storageMib: resourceQuantity,
   }),
 });
-const nodeSettingsInput = z.object({ schedulingEnabled: z.boolean() });
+const nodeSettingsInput = z.object({ schedulingEnabled: z.boolean().optional(), advertisedAddress: z.string().trim().min(1).max(253).nullable().optional() }).refine((value) => Object.keys(value).length > 0);
 const commandResultInput = z
   .object({
     commandId: z.string().uuid(),
@@ -145,6 +152,7 @@ routes.get("/organizations/:orgSlug/nodes", async (c) => {
       id: nodes.id,
       name: nodes.name,
       hostname: nodes.hostname,
+      advertisedAddress: nodes.advertisedAddress,
       status: nodes.status,
       architecture: nodes.architecture,
       os: nodes.os,
@@ -160,9 +168,7 @@ routes.get("/organizations/:orgSlug/nodes", async (c) => {
     })
     .from(nodes)
     .where(or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId)));
-  return c.json(
-    items.map((node) => ({ ...node, schedulingEnabled: node.schedulingEnabled === 1 })),
-  );
+  return c.json(items.map((node) => ({ ...node, schedulingEnabled: node.schedulingEnabled === 1 })));
 });
 
 /** Node details and assignments are read-only control-plane views for the dashboard. */
@@ -209,18 +215,37 @@ routes.patch("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
     return c.json({ error: "Permission required: nodes.manage" }, 403);
   const parsed = nodeSettingsInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid node settings" }, 400);
+  let advertisedAddress: string | null | undefined = parsed.data.advertisedAddress;
+  if (advertisedAddress) {
+    try { advertisedAddress = normalizeAdvertisedAddress(advertisedAddress); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid advertised address" }, 400); }
+  }
   const updated = await db
     .update(nodes)
-    .set({ schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0, updatedAt: new Date() })
+    .set({ ...(parsed.data.schedulingEnabled === undefined ? {} : { schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0 }), ...(advertisedAddress !== undefined ? { advertisedAddress } : {}), updatedAt: new Date() })
     .where(
       and(
         eq(nodes.id, c.req.param("nodeId")),
         or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId)),
       ),
     )
-    .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled });
+    .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled, advertisedAddress: nodes.advertisedAddress });
   if (!updated[0]) return c.json({ error: "Node not found" }, 404);
-  return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1 });
+  if (advertisedAddress !== undefined) {
+    await db.insert(auditLogs).values({
+      id: crypto.randomUUID(),
+      actorId: access.userId,
+      action: "node.advertised_address_updated",
+      targetType: "node",
+      targetId: updated[0].id,
+      metadata: JSON.stringify({ organizationId: access.org.id, advertisedAddress: updated[0].advertisedAddress }),
+      ipAddress: c.req.header("x-real-ip") ?? null,
+    });
+    void reconcileDomainRoutesForNode(updated[0].id).catch((error) =>
+      c.get("logger").error({ error, nodeId: updated[0].id }, "Unable to reconcile routes after advertised address change"),
+    );
+  }
+  return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1, advertisedAddress: updated[0].advertisedAddress });
 });
 
 /** Public enrollment endpoint. It accepts only a single-use registration secret, never a user session. */
@@ -237,6 +262,9 @@ routes.post("/api/agents/register", async (c) => {
   });
   if (!registration) return c.json({ error: "Registration token is invalid or expired" }, 401);
   const agentToken = createSecret();
+  let advertisedAddress: string | null = null;
+  try { advertisedAddress = parsed.data.advertisedAddress ? normalizeAdvertisedAddress(parsed.data.advertisedAddress) : null; }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid advertised address" }, 400); }
   const nodeId = crypto.randomUUID();
   const enrolled = await db.transaction(async (tx) => {
     const consumed = await tx
@@ -252,6 +280,7 @@ routes.post("/api/agents/register", async (c) => {
       organizationId: registration.organizationId,
       name: parsed.data.name,
       hostname: parsed.data.hostname,
+      advertisedAddress,
       architecture: parsed.data.architecture,
       os: parsed.data.os,
       agentVersion: parsed.data.agentVersion,
@@ -283,12 +312,16 @@ routes.post("/api/agents/local/register", async (c) => {
   if (!localToken || !secretMatches(parsed.data.localToken, localToken))
     return c.json({ error: "Local agent authentication required" }, 401);
   const agentToken = createSecret();
+  let advertisedAddress: string | null = null;
+  try { advertisedAddress = parsed.data.advertisedAddress ? normalizeAdvertisedAddress(parsed.data.advertisedAddress) : null; }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid advertised address" }, 400); }
   const existing = await db.query.nodes.findFirst({
     where: and(isNull(nodes.organizationId), eq(nodes.hostname, parsed.data.hostname)),
   });
   const values = {
     name: parsed.data.name,
     hostname: parsed.data.hostname,
+    advertisedAddress,
     architecture: parsed.data.architecture,
     os: parsed.data.os,
     agentVersion: parsed.data.agentVersion,
@@ -324,6 +357,11 @@ routes.post("/api/agents/heartbeat", async (c) => {
       updatedAt: new Date(),
     })
     .where(eq(nodes.id, node.id));
+  if (node.status !== parsed.data.status) {
+    void reconcileDomainRoutesForNode(node.id).catch((error) =>
+      c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after node status change"),
+    );
+  }
   // Resource snapshots are deliberately not accepted as user-writable node fields. Persisting time-series metrics is the observability module's responsibility.
   const resources: NodeResources = parsed.data.resources;
   return c.json({ accepted: true, resources });
@@ -332,15 +370,51 @@ routes.post("/api/agents/heartbeat", async (c) => {
 routes.get("/api/agents/commands", async (c) => {
   const node = await agentIdentity(c.req.raw);
   if (!node) return c.json({ error: "Agent authentication required" }, 401);
-  const commands = await db
+  // A command is leased to one poll. If the agent dies before reporting its
+  // result, the expired lease makes it eligible again without re-running it on
+  // every normal polling interval.
+  const now = new Date();
+  const leaseExpiredAt = new Date(now.getTime() - 5 * 60_000);
+  const candidates = await db
     .select()
     .from(agentCommands)
     .where(
       and(
         eq(agentCommands.nodeId, node.id),
-        or(eq(agentCommands.status, "pending"), eq(agentCommands.status, "delivered")),
+        or(
+          eq(agentCommands.status, "pending"),
+          and(
+            eq(agentCommands.status, "delivered"),
+            or(isNull(agentCommands.deliveredAt), lt(agentCommands.deliveredAt, leaseExpiredAt)),
+          ),
+        ),
       ),
     );
+  const commands = (await Promise.all(
+    candidates.map((candidate) =>
+      db
+        .update(agentCommands)
+        .set({
+          status: "delivered",
+          deliveredAt: now,
+          deliveryAttempts: sql`${agentCommands.deliveryAttempts} + 1`,
+        })
+        .where(
+          and(
+            eq(agentCommands.id, candidate.id),
+            eq(agentCommands.nodeId, node.id),
+            or(
+              eq(agentCommands.status, "pending"),
+              and(
+                eq(agentCommands.status, "delivered"),
+                or(isNull(agentCommands.deliveredAt), lt(agentCommands.deliveredAt, leaseExpiredAt)),
+              ),
+            ),
+          ),
+        )
+        .returning(),
+    ),
+  )).flat();
   return c.json(
     commands.map((command) => ({
       commandId: command.id,
@@ -352,7 +426,31 @@ routes.get("/api/agents/commands", async (c) => {
     })),
   );
 });
-const workloadTelemetryInput = z.object({ reports: z.array(z.object({ workloadId: z.string().uuid(), actualState: z.enum(["running", "stopped", "failed", "unknown"]), healthStatus: z.enum(["none", "starting", "healthy", "unhealthy"]) })).max(500) });
+const reportedPortsInput = z.record(z.number().int().min(1).max(65_535));
+const workloadTelemetryInput = z.object({ reports: z.array(z.object({ workloadId: z.string().uuid(), actualState: z.enum(["running", "stopped", "failed", "unknown"]), healthStatus: z.enum(["none", "starting", "healthy", "unhealthy"]), ports: reportedPortsInput.optional() })).max(500) });
+const metricNumber = z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER);
+const workloadMetricsInput = z.object({ samples: z.array(z.object({ workloadId: z.string().uuid(), recordedAt: z.string().datetime(), cpuUsagePercent: z.number().finite().min(0).max(10_000).nullable(), memoryUsageBytes: metricNumber, memoryLimitBytes: metricNumber.nullable(), networkRxBytes: metricNumber, networkTxBytes: metricNumber, diskReadBytes: metricNumber, diskWriteBytes: metricNumber })).min(1).max(500) });
+
+const configuredPortsSchema = z.object({ ports: z.array(z.object({ containerPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).optional(), exposure: z.enum(["private", "public"]).optional() })).default([]) });
+
+async function replaceObservedWorkloadPorts(nodeId: string, workloadId: string, ports: Record<string, number>): Promise<void> {
+  const workload = await db.query.workloads.findFirst({ where: and(eq(workloads.id, workloadId), eq(workloads.nodeId, nodeId)) });
+  if (!workload) return;
+  const deployment = await db.query.deployments.findFirst({ where: eq(deployments.id, workload.deploymentId) });
+  const configured = configuredPortsSchema.safeParse(deployment?.runtimeConfig).data?.ports ?? [];
+  const observed = Object.entries(ports).flatMap(([key, hostPort]) => {
+    const match = /^(\d+)\/(tcp|udp)$/.exec(key);
+    if (!match) return [];
+    const containerPort = Number(match[1]); const protocol = match[2] as "tcp" | "udp";
+    const configuredPort = configured.find((item) => item.containerPort === containerPort && (item.protocol ?? "tcp") === protocol);
+    if (!configuredPort || (configuredPort.exposure ?? "private") !== "public") return [];
+    return [{ workloadId, containerPort, hostPort, protocol, exposure: "public" as const, observedAt: new Date() }];
+  });
+  await db.transaction(async (tx) => {
+    await tx.delete(workloadPorts).where(eq(workloadPorts.workloadId, workloadId));
+    if (observed.length) await tx.insert(workloadPorts).values(observed);
+  });
+}
 
 /** Delivers decrypted secrets only to the agent assigned to this workload. They are never copied into commands or deployment records. */
 routes.get("/api/agents/workloads/:workloadId/secrets", async (c) => {
@@ -374,10 +472,33 @@ routes.get("/api/agents/workloads/:workloadId/secrets", async (c) => {
   return c.json({ environment });
 });
 
+/** Registry credentials are delivered separately from container environment variables. */
+routes.get("/api/agents/workloads/:workloadId/registry-credentials", async (c) => {
+  const node = await agentIdentity(c.req.raw);
+  if (!node) return c.json({ error: "Agent authentication required" }, 401);
+  const workload = await db.query.workloads.findFirst({ where: and(eq(workloads.id, c.req.param("workloadId")), eq(workloads.nodeId, node.id)) });
+  if (!workload) return c.json({ error: "Workload not found" }, 404);
+  const deployment = await db.query.deployments.findFirst({ where: eq(deployments.id, workload.deploymentId) });
+  if (!deployment) return c.json({ error: "Deployment not found" }, 404);
+  const application = await db.query.applications.findFirst({ where: eq(applications.id, deployment.applicationId) });
+  if (!application) return c.json({ error: "Application not found" }, 404);
+  const snapshot = deployment.configurationSnapshot as { registryCredentialReference?: unknown } | null;
+  const reference = typeof snapshot?.registryCredentialReference === "string" ? snapshot.registryCredentialReference : null;
+  if (!reference) return c.json({ credentials: null });
+  const [credential] = await db.select({ valueEncrypted: environmentVariables.valueEncrypted }).from(environmentVariables).innerJoin(projectEnvironments, eq(environmentVariables.environmentId, projectEnvironments.id)).where(and(eq(environmentVariables.id, reference), eq(environmentVariables.isSecret, true), eq(projectEnvironments.projectId, application.projectId))).limit(1);
+  if (!credential) return c.json({ error: "Registry credential is unavailable" }, 409);
+  let raw: unknown;
+  try { raw = JSON.parse(await decryptEnvironmentValue(credential.valueEncrypted)); }
+  catch { return c.json({ error: "Registry credential must contain JSON username and password fields" }, 409); }
+  const parsed = z.object({ username: z.string().min(1).max(512), password: z.string().min(1).max(4096) }).safeParse(raw);
+  if (!parsed.success) return c.json({ error: "Registry credential must contain JSON username and password fields" }, 409);
+  return c.json({ credentials: parsed.data });
+});
+
 routes.get("/api/agents/workloads", async (c) => {
   const node = await agentIdentity(c.req.raw);
   if (!node) return c.json({ error: "Agent authentication required" }, 401);
-  return c.json(await db.select({ workloadId: workloads.id }).from(workloads).where(and(eq(workloads.nodeId, node.id), eq(workloads.desiredState, "running"))));
+  return c.json(await db.select({ workloadId: workloads.id, cpuMilli: sql<number>`(${deployments.requirements}->>'cpuMilli')::integer` }).from(workloads).innerJoin(deployments, eq(workloads.deploymentId, deployments.id)).where(and(eq(workloads.nodeId, node.id), eq(workloads.desiredState, "running"))));
 });
 
 routes.post("/api/agents/workloads/telemetry", async (c) => {
@@ -385,8 +506,27 @@ routes.post("/api/agents/workloads/telemetry", async (c) => {
   if (!node) return c.json({ error: "Agent authentication required" }, 401);
   const parsed = workloadTelemetryInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid workload telemetry", issues: parsed.error.flatten() }, 400);
-  await Promise.all(parsed.data.reports.map((report) => db.update(workloads).set({ actualState: report.actualState, healthStatus: report.healthStatus, healthMessage: null, lastReportedAt: new Date() }).where(and(eq(workloads.id, report.workloadId), eq(workloads.nodeId, node.id)))));
+  await Promise.all(parsed.data.reports.map(async (report) => {
+    await db.update(workloads).set({ actualState: report.actualState, healthStatus: report.healthStatus, healthMessage: null, ...(report.ports === undefined ? {} : { publishedPorts: report.ports }), lastReportedAt: new Date() }).where(and(eq(workloads.id, report.workloadId), eq(workloads.nodeId, node.id)));
+    if (report.ports !== undefined) await replaceObservedWorkloadPorts(node.id, report.workloadId, report.ports);
+  }));
   return c.json({ accepted: parsed.data.reports.length });
+});
+
+/** Agent-only batch ingestion. The node is derived from the bearer token, not client input. */
+routes.post("/api/agents/workloads/metrics", async (c) => {
+  const node = await agentIdentity(c.req.raw);
+  if (!node) return c.json({ error: "Agent authentication required" }, 401);
+  const parsed = workloadMetricsInput.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: "Invalid workload metrics", issues: parsed.error.flatten() }, 400);
+  const now = Date.now();
+  const samples = parsed.data.samples.map((sample) => ({ ...sample, recordedAt: new Date(sample.recordedAt) }));
+  if (samples.some((sample) => sample.recordedAt.getTime() < now - 8 * 24 * 60 * 60_000 || sample.recordedAt.getTime() > now + 5 * 60_000)) return c.json({ error: "Metric timestamp is outside the accepted window" }, 400);
+  const ids = [...new Set(samples.map((sample) => sample.workloadId))];
+  const owned = await db.select({ id: workloads.id }).from(workloads).where(and(inArray(workloads.id, ids), eq(workloads.nodeId, node.id)));
+  if (owned.length !== ids.length) return c.json({ error: "Metric batch contains a workload not assigned to this node" }, 403);
+  await new PostgresWorkloadMetricsProvider().write(samples.map((sample) => ({ ...sample, nodeId: node.id })));
+  return c.json({ accepted: samples.length }, 202);
 });
 
 routes.post("/api/agents/commands/results", async (c) => {
@@ -403,7 +543,7 @@ routes.post("/api/agents/commands/results", async (c) => {
       and(
         eq(agentCommands.id, result.commandId),
         eq(agentCommands.nodeId, node.id),
-        or(eq(agentCommands.status, "pending"), eq(agentCommands.status, "delivered")),
+        eq(agentCommands.status, "delivered"),
       ),
     )
     .returning({
@@ -451,6 +591,7 @@ routes.post("/api/agents/commands/results", async (c) => {
         }
       }
     }
+    if (runtime.success && runtime.data.ports) await replaceObservedWorkloadPorts(node.id, command.resourceId, runtime.data.ports);
   } else if (command.type === "workload.stop" || command.type === "workload.delete") {
     await db
       .update(workloads)

@@ -12,6 +12,7 @@ const requirementsSchema = z.object({
   architecture: z.string().min(1).optional(),
   region: z.string().min(1).optional(),
   requiredLabels: z.record(z.string()).optional(),
+  requiredNodeId: z.string().uuid().optional(),
 });
 
 /** Reconciles desired deployment state into durable agent commands; it never invokes a runtime itself. */
@@ -20,7 +21,7 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
     where: eq(deployments.id, deploymentId),
   });
   if (!deployment) return;
-  const requirements = requirementsSchema.parse(deployment.requirements) as WorkloadRequirements;
+  let requirements = requirementsSchema.parse(deployment.requirements) as WorkloadRequirements;
   const currentWorkloads = await db
     .select()
     .from(workloads)
@@ -39,13 +40,20 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
   if (missingReplicas === 0) return;
 
   const candidates = await loadCandidates();
+  const persistentVolumes = Boolean(z.object({ volumes: z.array(z.unknown()).optional() }).safeParse(deployment.runtimeConfig).data?.volumes?.length);
   for (let index = 0; index < missingReplicas; index += 1) {
     const decision = scheduleWorkload(candidates, requirements);
     const nodeId = decision.nodeId;
     if (!nodeId) return;
     const workloadId = crypto.randomUUID();
     const commandId = crypto.randomUUID();
+    const pinnedRequirements = persistentVolumes && !requirements.requiredNodeId
+      ? { ...requirements, requiredNodeId: nodeId }
+      : requirements;
     await db.transaction(async (tx) => {
+      if (pinnedRequirements !== requirements) {
+        await tx.update(deployments).set({ requirements: pinnedRequirements }).where(eq(deployments.id, deployment.id));
+      }
       await tx.insert(workloads).values({
         id: workloadId,
         deploymentId: deployment.id,
@@ -68,6 +76,7 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
         },
       });
     });
+    requirements = pinnedRequirements;
     reserve(candidates, nodeId, requirements);
   }
 }
@@ -108,6 +117,14 @@ async function requestStateChange(
   });
   if (pending) return;
   const desiredState = type === "workload.delete" ? "deleted" : "stopped";
+  const deployment = await db.query.deployments.findFirst({
+    where: eq(deployments.id, workload.deploymentId),
+    columns: { runtimeConfig: true },
+  });
+  const gracefulShutdownSeconds = z
+    .object({ gracefulShutdownSeconds: z.number().int().min(1).max(600).optional() })
+    .safeParse(deployment?.runtimeConfig)
+    .data?.gracefulShutdownSeconds;
   await db.transaction(async (tx) => {
     await tx.update(workloads).set({ desiredState }).where(eq(workloads.id, workload.id));
     await tx.insert(agentCommands).values({
@@ -115,7 +132,7 @@ async function requestStateChange(
       nodeId,
       type,
       resourceId: workload.id,
-      payload: { workloadId: workload.id },
+      payload: { workloadId: workload.id, ...(gracefulShutdownSeconds ? { gracefulShutdownSeconds } : {}) },
     });
   });
 }

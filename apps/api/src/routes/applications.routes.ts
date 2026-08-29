@@ -1,5 +1,6 @@
 import {
   applicationDeployments,
+  agentCommands,
   applicationBuildConfigurations,
   applicationEnvironmentVariables,
   applicationPorts,
@@ -15,9 +16,10 @@ import {
   environmentVariables,
   projectEnvironments,
   projects,
+  user,
   workloads,
 } from "@repo/db";
-import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, like, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
@@ -28,6 +30,8 @@ import {
 import type { AppEnv } from "../types/env.js";
 import { listAccessibleProjects, resolveProjectAccess } from "../features/projects/access.js";
 import { decryptEnvironmentValue, encryptEnvironmentValue } from "../features/environments/crypto.js";
+import { PostgresWorkloadMetricsProvider } from "../features/metrics/postgres-provider.js";
+import { aggregateWorkloadMetrics, metricBucketMs } from "../features/metrics/service.js";
 
 const routes = new Hono<AppEnv>();
 routes.use("/*", requireAuthenticatedUser);
@@ -74,6 +78,8 @@ const applicationFields = z.object({
     })
     .optional(),
   autoDeployEnabled: z.boolean().optional(),
+  gitCredentialReference: z.string().uuid().nullable().optional(),
+  registryCredentialReference: z.string().uuid().nullable().optional(),
 });
 const applicationInput = applicationFields.superRefine((value, context) => {
   if (value.sourceType === "git" && !value.gitUrl) {
@@ -104,12 +110,22 @@ const deploymentRequest = z.object({
 function isCredentialFreeHttpsGitUrl(value: string) {
   try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password; } catch { return false; }
 }
+async function secretReferenceInProject(projectId: string, reference: string | null | undefined) {
+  if (!reference) return true;
+  const credential = await db
+    .select({ id: environmentVariables.id })
+    .from(environmentVariables)
+    .innerJoin(projectEnvironments, eq(environmentVariables.environmentId, projectEnvironments.id))
+    .where(and(eq(environmentVariables.id, reference), eq(environmentVariables.isSecret, true), eq(projectEnvironments.projectId, projectId)))
+    .limit(1);
+  return credential.length > 0;
+}
 const buildConfigurationInput = z.object({
   buildMode: z.literal("dockerfile").default("dockerfile"), runtime: z.string().trim().min(1).max(64).default("container"), runtimeVersion: z.string().trim().max(64).nullable().optional(), rootDirectory: z.string().trim().min(1).max(512).refine((value) => !value.startsWith("/") && !value.split(/[\\/]+/).includes("..")), installCommand: z.string().max(2_000).nullable().optional(), buildCommand: z.string().max(2_000).nullable().optional(), startCommand: z.string().max(2_000).nullable().optional(), dockerfilePath: z.string().trim().max(512).nullable().optional(), buildContext: z.string().trim().max(512).nullable().optional(),
 });
 const runtimeConfigurationInput = z.object({ runtime: z.literal("container").default("container"), command: z.string().trim().min(1).max(2_000).nullable().optional(), workingDirectory: z.string().trim().min(1).max(512).refine((value) => value.startsWith("/")).nullable().optional(), restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).default("unless-stopped"), gracefulShutdownSeconds: z.number().int().min(1).max(600).default(15), healthcheckCommand: z.string().trim().min(1).max(2_000).nullable().optional(), healthcheckIntervalSeconds: z.number().int().min(1).max(3_600).default(30), healthcheckTimeoutSeconds: z.number().int().min(1).max(600).default(5), healthcheckRetries: z.number().int().min(1).max(20).default(3), healthcheckStartPeriodSeconds: z.number().int().min(0).max(3_600).default(0), replicas: z.number().int().min(1).max(100).default(1) });
 const resourceConfigurationInput = z.object({ cpuMilli: z.number().int().min(1).max(256_000).default(250), memoryMib: z.number().int().min(16).max(1_048_576).default(256), storageMib: z.number().int().min(0).max(1_048_576).default(0) });
-const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); seen.add(key); }); });
+const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); if (port.externalPort && port.exposure !== "public") ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: "An external port requires public exposure" }); seen.add(key); }); });
 const volumeMountInput = z.object({ volumeName: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/), mountPath: z.string().startsWith("/").max(512), readOnly: z.boolean().default(false) });
 const secretAttachmentInput = z.object({ environmentId: z.string().uuid(), secretEnvironmentVariableId: z.string().uuid(), targetKey: z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/) });
 const applicationVariableInput = z.object({ environmentId: z.string().uuid().nullable().optional(), value: z.string().max(16_384) });
@@ -138,9 +154,27 @@ routes.get("/:orgSlug/applications", async (c) => {
   const scope = await listAccessibleProjects(c.req.raw, c.req.param("orgSlug"), "applications.read");
   if (!scope) return c.json({ error: "Organization not found or access denied" }, 404);
   const projectIds = scope.projects.map((project) => project.id);
-  if (!projectIds.length) return c.json([]);
   const query = c.req.query();
-  const items = await db
+  const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit ?? "25", 10) || 25));
+  const paginated = query.page !== undefined || query.limit !== undefined;
+  if (!projectIds.length) return c.json(paginated ? { items: [], page, limit, total: 0, totalPages: 0 } : []);
+  const search = query.search?.trim();
+  const sourceType = query.sourceType === "git" || query.sourceType === "docker" ? query.sourceType : undefined;
+  const lifecycleStatus = query.status === "active" || query.status === "archived" ? query.status : undefined;
+  const applicationType = ["web", "api", "worker", "game_server", "custom"].includes(query.type ?? "") ? query.type as "web" | "api" | "worker" | "game_server" | "custom" : undefined;
+  const conditions: SQL[] = [eq(applications.organizationId, scope.organization.id), inArray(applications.projectId, projectIds)];
+  if (query.projectId) conditions.push(eq(applications.projectId, query.projectId));
+  if (sourceType) conditions.push(eq(applications.sourceType, sourceType));
+  if (lifecycleStatus) conditions.push(eq(applications.lifecycleStatus, lifecycleStatus));
+  if (applicationType) conditions.push(eq(applications.applicationType, applicationType));
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(or(ilike(applications.name, pattern), ilike(applications.slug, pattern), ilike(applications.description, pattern), ilike(applications.gitUrl, pattern), ilike(applications.imageName, pattern))!);
+  }
+  const where = and(...conditions);
+  const orderBy = query.sort === "name" ? asc(applications.name) : query.sort === "created" ? desc(applications.createdAt) : desc(applications.updatedAt);
+  const listing = db
     .select({
       id: applications.id,
       name: applications.name,
@@ -166,20 +200,15 @@ routes.get("/:orgSlug/applications", async (c) => {
     })
     .from(applications)
     .innerJoin(projects, eq(applications.projectId, projects.id))
-    .where(and(eq(applications.organizationId, scope.organization.id), inArray(applications.projectId, projectIds)))
-    .orderBy(asc(projects.name), asc(applications.name));
-  const search = query.search?.trim().toLowerCase();
-  const sourceType = query.sourceType === "git" || query.sourceType === "docker" ? query.sourceType : undefined;
-  const lifecycleStatus = query.status === "active" || query.status === "archived" ? query.status : undefined;
-  const applicationType = ["web", "api", "worker", "game_server", "custom"].includes(query.type ?? "") ? query.type : undefined;
-  const filtered = items
-    .filter((item) => !query.projectId || item.projectId === query.projectId)
-    .filter((item) => !sourceType || item.sourceType === sourceType)
-    .filter((item) => !lifecycleStatus || item.lifecycleStatus === lifecycleStatus)
-    .filter((item) => !applicationType || item.applicationType === applicationType)
-    .filter((item) => !search || [item.name, item.slug, item.description ?? "", item.gitUrl ?? ""].some((value) => value.toLowerCase().includes(search)))
-    .sort((a, b) => query.sort === "name" ? a.name.localeCompare(b.name) : query.sort === "created" ? b.createdAt.getTime() - a.createdAt.getTime() : b.updatedAt.getTime() - a.updatedAt.getTime());
-  return c.json(filtered);
+    .where(where)
+    .orderBy(orderBy);
+  const [items, totalRows] = await Promise.all([
+    paginated ? listing.limit(limit).offset((page - 1) * limit) : listing,
+    paginated ? db.select({ total: count() }).from(applications).where(where) : Promise.resolve([]),
+  ]);
+  if (!paginated) return c.json(items);
+  const total = totalRows[0]?.total ?? 0;
+  return c.json({ items, page, limit, total, totalPages: Math.ceil(total / limit) });
 });
 
 routes.get("/:orgSlug/projects/:projectId/applications", async (c) => {
@@ -208,6 +237,8 @@ routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
   }
   if (parsed.data.sourceType === "git" && parsed.data.gitUrl && !isCredentialFreeHttpsGitUrl(parsed.data.gitUrl))
     return c.json({ error: "Git repositories must use credential-free HTTPS URLs" }, 400);
+  if (!(await secretReferenceInProject(scope.project.id, parsed.data.gitCredentialReference)) || !(await secretReferenceInProject(scope.project.id, parsed.data.registryCredentialReference)))
+    return c.json({ error: "Git credential must be a secret variable in this project" }, 400);
   const id = crypto.randomUUID();
   try {
     await db.insert(applications).values({
@@ -228,6 +259,8 @@ routes.post("/:orgSlug/projects/:projectId/applications", async (c) => {
       rootDirectory: parsed.data.rootDirectory ?? ".",
       buildConfiguration: parsed.data.buildConfiguration ?? {},
       autoDeployEnabled: parsed.data.autoDeployEnabled ?? false,
+      gitCredentialReference: parsed.data.gitCredentialReference ?? null,
+      registryCredentialReference: parsed.data.registryCredentialReference ?? null,
     });
   } catch (error) {
     if ((error as { code?: string }).code === "23505")
@@ -266,6 +299,10 @@ routes.patch("/:orgSlug/projects/:projectId/applications/:applicationId", async 
     return c.json({ error: "A Git URL is required" }, 400);
   if (nextSourceType === "git" && nextGitUrl && !isCredentialFreeHttpsGitUrl(nextGitUrl))
     return c.json({ error: "Git repositories must use credential-free HTTPS URLs" }, 400);
+  const nextGitCredentialReference = parsed.data.gitCredentialReference === undefined ? current.gitCredentialReference : parsed.data.gitCredentialReference;
+  const nextRegistryCredentialReference = parsed.data.registryCredentialReference === undefined ? current.registryCredentialReference : parsed.data.registryCredentialReference;
+  if (!(await secretReferenceInProject(scope.project.id, nextGitCredentialReference)) || !(await secretReferenceInProject(scope.project.id, nextRegistryCredentialReference)))
+    return c.json({ error: "Git credential must be a secret variable in this project" }, 400);
   if (nextSourceType === "docker" && !nextImageName)
     return c.json({ error: "A Docker image is required" }, 400);
   try {
@@ -391,6 +428,15 @@ routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/configurat
   return c.json({ application, build: build ?? null, runtime: runtime ?? null, resources: resources ?? null, ports, volumes, secrets, environments, applicationVariables });
 });
 
+routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/activity", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  const application = await applicationInScope(scope, c.req.param("applicationId"));
+  if (!application) return c.json({ error: "Application not found" }, 404);
+  const items = await db.select({ id: auditLogs.id, action: auditLogs.action, metadata: auditLogs.metadata, createdAt: auditLogs.createdAt, actorName: user.name, actorEmail: user.email }).from(auditLogs).leftJoin(user, eq(auditLogs.actorId, user.id)).where(or(eq(auditLogs.targetId, application.id), like(auditLogs.metadata, `%"applicationId":"${application.id}"%`))).orderBy(desc(auditLogs.createdAt)).limit(50);
+  return c.json(items);
+});
+
 routes.put("/:orgSlug/projects/:projectId/applications/:applicationId/build-configuration", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
@@ -498,6 +544,30 @@ routes.delete("/:orgSlug/projects/:projectId/applications/:applicationId/variabl
   await recordAudit("application.variable_deleted", application.id, scope.userId, c.req.raw, scope.project.id); return c.body(null, 204);
 });
 
+routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/metrics", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  if (!scope.permissions.includes("applications.read")) return c.json({ error: "Permission required: applications.read" }, 403);
+  const application = await applicationInScope(scope, c.req.param("applicationId"));
+  if (!application) return c.json({ error: "Application not found" }, 404);
+  const range = z.enum(["15m", "1h", "6h", "24h", "7d"]).safeParse(c.req.query("range") ?? "1h");
+  if (!range.success) return c.json({ error: "Invalid metrics range" }, 400);
+  const requestedWorkload = c.req.query("workloadId");
+  if (requestedWorkload && !z.string().uuid().safeParse(requestedWorkload).success) return c.json({ error: "Invalid workload ID" }, 400);
+  const requestedDeployment = c.req.query("deploymentId");
+  if (requestedDeployment && !z.string().uuid().safeParse(requestedDeployment).success) return c.json({ error: "Invalid deployment ID" }, 400);
+  const deploymentItems = await db.select({ id: deployments.id }).from(deployments).where(and(eq(deployments.applicationId, application.id), ...(requestedDeployment ? [eq(deployments.id, requestedDeployment)] : [])));
+  if (requestedDeployment && deploymentItems.length === 0) return c.json({ error: "Deployment not found" }, 404);
+  const allWorkloads = deploymentItems.length ? await db.select({ id: workloads.id }).from(workloads).where(inArray(workloads.deploymentId, deploymentItems.map((deployment) => deployment.id))) : [];
+  const workloadIds = requestedWorkload ? allWorkloads.filter((workload) => workload.id === requestedWorkload).map((workload) => workload.id) : allWorkloads.map((workload) => workload.id);
+  if (requestedWorkload && workloadIds.length === 0) return c.json({ error: "Workload not found" }, 404);
+  const durationMs = ({ "15m": 15 * 60_000, "1h": 60 * 60_000, "6h": 6 * 60 * 60_000, "24h": 24 * 60 * 60_000, "7d": 7 * 24 * 60 * 60_000 } as const)[range.data];
+  const to = new Date(); const from = new Date(to.getTime() - durationMs);
+  const bucketMs = metricBucketMs(range.data);
+  const samples = await new PostgresWorkloadMetricsProvider().query(workloadIds, from, to, bucketMs);
+  return c.json({ range: range.data, from: from.toISOString(), to: to.toISOString(), deploymentId: requestedDeployment ?? null, workloads: workloadIds, samples: aggregateWorkloadMetrics(samples, bucketMs) });
+});
+
 routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/runtime", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
@@ -598,19 +668,22 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
     ...(parsed.data.region ? { region: parsed.data.region } : {}),
     ...(parsed.data.requiredLabels ? { requiredLabels: parsed.data.requiredLabels } : {}),
   };
-  const ports = configuredPorts.length ? configuredPorts : [{ internalPort: application.internalPort, protocol: "tcp" as const, exposure: "private" as const }];
+  if (configuredVolumes.some((volume) => !volume.readOnly) && (parsed.data.replicas ?? runtimeDefaults?.replicas ?? 1) > 1)
+    return c.json({ error: "Writable local volumes require a single replica until shared storage is configured" }, 409);
+  const ports = configuredPorts.length ? configuredPorts : [{ internalPort: application.internalPort, protocol: "tcp" as const, exposure: "private" as const, externalPort: null }];
   const runtimeConfig = {
     environment,
-    ports: ports.map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure })),
+    ports: ports.map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure, ...(port.externalPort ? { externalPort: port.externalPort } : {}) })),
     volumes: configuredVolumes.map((volume) => ({ name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })),
     restartPolicy: runtimeDefaults?.restartPolicy ?? "unless-stopped",
     gracefulShutdownSeconds: runtimeDefaults?.gracefulShutdownSeconds ?? 15,
+    ...(application.registryCredentialReference ? { registryCredentialReference: application.registryCredentialReference } : {}),
     ...(runtimeDefaults?.command ? { command: runtimeDefaults.command } : {}),
     ...(runtimeDefaults?.workingDirectory ? { workingDirectory: runtimeDefaults.workingDirectory } : {}),
     ...(runtimeDefaults?.healthcheckCommand ? { healthCheck: { command: runtimeDefaults.healthcheckCommand, intervalSeconds: runtimeDefaults.healthcheckIntervalSeconds, timeoutSeconds: runtimeDefaults.healthcheckTimeoutSeconds, retries: runtimeDefaults.healthcheckRetries, startPeriodSeconds: runtimeDefaults.healthcheckStartPeriodSeconds } } : {}),
   };
   const secretReferences = environmentId ? await db.select({ id: applicationSecretAttachments.id, targetKey: applicationSecretAttachments.targetKey, secretEnvironmentVariableId: applicationSecretAttachments.secretEnvironmentVariableId }).from(applicationSecretAttachments).where(and(eq(applicationSecretAttachments.applicationId, application.id), eq(applicationSecretAttachments.environmentId, environmentId))) : [];
-  const configurationSnapshot = { source: { type: application.sourceType === "docker" ? "image" : "git", image: application.imageName }, environmentId: environmentId ?? null, runtime: runtimeDefaults ?? { runtime: "container", replicas: 1, restartPolicy: "unless-stopped", gracefulShutdownSeconds: 15 }, resources: requirements, ports, volumes: configuredVolumes, environmentKeys: Object.keys(environment), applicationVariableKeys: applicationVariables.map((variable) => ({ key: variable.key, environmentId: variable.environmentId })), secretReferences };
+  const configurationSnapshot = { source: { type: application.sourceType === "docker" ? "image" : "git", image: application.imageName }, environmentId: environmentId ?? null, runtime: runtimeDefaults ?? { runtime: "container", replicas: 1, restartPolicy: "unless-stopped", gracefulShutdownSeconds: 15 }, resources: requirements, ports, volumes: configuredVolumes, environmentKeys: Object.keys(environment), applicationVariableKeys: applicationVariables.map((variable) => ({ key: variable.key, environmentId: variable.environmentId })), secretReferences, registryCredentialReference: application.registryCredentialReference };
   const previous = await db
     .select({ version: deployments.version })
     .from(deployments)
@@ -681,6 +754,27 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/stop", as
   });
   await recordAudit("application.stopped", application.id, scope.userId, c.req.raw, scope.project.id);
   return c.json({ status: "stopping" }, 202);
+});
+
+const applicationLogsQuery = z.object({ tail: z.coerce.number().int().min(1).max(2_000).default(500) });
+routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/logs", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  const application = await applicationInScope(scope, c.req.param("applicationId"));
+  if (!application) return c.json({ error: "Application not found" }, 404);
+  const query = applicationLogsQuery.safeParse(c.req.query());
+  if (!query.success) return c.json({ error: "Invalid log request" }, 400);
+  const active = await db.select({ id: workloads.id, nodeId: workloads.nodeId, actualState: workloads.actualState }).from(workloads).innerJoin(deployments, eq(workloads.deploymentId, deployments.id)).where(and(eq(deployments.applicationId, application.id), eq(workloads.desiredState, "running"))).limit(100);
+  const entries = await Promise.all(active.map(async (workload) => {
+    const [latest, pending] = await Promise.all([
+      db.select({ result: agentCommands.result, completedAt: agentCommands.completedAt }).from(agentCommands).where(and(eq(agentCommands.resourceId, workload.id), eq(agentCommands.type, "workload.logs"), eq(agentCommands.status, "succeeded"))).orderBy(desc(agentCommands.completedAt)).limit(1),
+      db.query.agentCommands.findFirst({ where: and(eq(agentCommands.resourceId, workload.id), eq(agentCommands.type, "workload.logs"), or(eq(agentCommands.status, "pending"), eq(agentCommands.status, "delivered"))) }),
+    ]);
+    if (workload.nodeId && workload.actualState === "running" && !pending) await db.insert(agentCommands).values({ id: crypto.randomUUID(), nodeId: workload.nodeId, type: "workload.logs", resourceId: workload.id, payload: { tail: query.data.tail } });
+    const result = latest[0]?.result as { data?: { logs?: unknown } } | null;
+    return { workloadId: workload.id, status: workload.actualState, logs: typeof result?.data?.logs === "string" ? result.data.logs : "", updatedAt: latest[0]?.completedAt?.toISOString() ?? null };
+  }));
+  return c.json({ workloads: entries });
 });
 
 export { routes as applicationRoutes };

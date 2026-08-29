@@ -5,9 +5,11 @@ import { ArrowLeft, Box, GitBranch, Play, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { PageHeader } from "@/components/layout/page-header";
 import { ResourceStatusBadge } from "@/components/resources/resource-status-badge";
 import { Button } from "@/components/ui/button";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
 type Application = {
   id: string;
@@ -17,6 +19,8 @@ type Application = {
   description: string | null;
   sourceType: "git" | "docker";
   imageName: string | null;
+  gitCredentialReference: string | null;
+  registryCredentialReference: string | null;
   gitUrl: string | null;
   branch: string;
   status: string;
@@ -49,6 +53,7 @@ type Configuration = {
     internalPort: number;
     protocol: string;
     exposure: string;
+    externalPort: number | null;
   }>;
   volumes: Array<{
     id: string;
@@ -82,6 +87,7 @@ type Runtime = {
   }>;
   workloads: Array<{
     id: string;
+    deploymentId: string;
     actualState: string;
     desiredState: string;
     healthStatus: "none" | "starting" | "healthy" | "unhealthy";
@@ -89,6 +95,9 @@ type Runtime = {
     restartCount: number;
   }>;
 };
+type ActivityEntry = { id: string; action: string; metadata: string | null; createdAt: string; actorName: string | null; actorEmail: string | null };
+type WorkloadLogs = { workloads: Array<{ workloadId: string; status: string; logs: string; updatedAt: string | null }> };
+type Metrics = { samples: Array<{ timestamp: string; cpuAverage: number | null; cpuMax: number | null; memoryAverageBytes: number; memoryMaxBytes: number; networkRxBytesPerSecond: number; networkTxBytesPerSecond: number; diskReadBytesPerSecond: number; diskWriteBytesPerSecond: number }> };
 
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 
@@ -117,6 +126,7 @@ export default function ApplicationDetailPage() {
   const [newPort, setNewPort] = useState("3000");
   const [newProtocol, setNewProtocol] = useState("tcp");
   const [newExposure, setNewExposure] = useState("private");
+  const [newExternalPort, setNewExternalPort] = useState("");
   const [newVolumeName, setNewVolumeName] = useState("");
   const [newMountPath, setNewMountPath] = useState("/data");
   const [newVolumeReadOnly, setNewVolumeReadOnly] = useState(false);
@@ -131,6 +141,11 @@ export default function ApplicationDetailPage() {
   const [newVariableEnvironmentId, setNewVariableEnvironmentId] = useState("");
   const [sourceReference, setSourceReference] = useState("");
   const [sourceBranch, setSourceBranch] = useState("main");
+  const [gitCredentialReference, setGitCredentialReference] = useState("");
+  const [registryCredentialReference, setRegistryCredentialReference] = useState("");
+  const [metricsRange, setMetricsRange] = useState<"15m" | "1h" | "6h" | "24h" | "7d">("1h");
+  const [metricsWorkloadId, setMetricsWorkloadId] = useState("");
+  const [metricsDeploymentId, setMetricsDeploymentId] = useState("");
   const applications = useQuery<Application[]>({
     queryKey: ["org", orgSlug, "applications"],
     queryFn: async () => {
@@ -196,6 +211,35 @@ export default function ApplicationDetailPage() {
       );
       if (!response.ok)
         throw new Error("Laufzeitdaten konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const activity = useQuery<ActivityEntry[]>({
+    enabled: Boolean(application),
+    queryKey: ["application", applicationId, "activity"],
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${application!.projectId}/applications/${applicationId}/activity`), { credentials: "include" });
+      if (!response.ok) throw new Error("Aktivität konnte nicht geladen werden");
+      return response.json();
+    },
+  });
+  const logs = useQuery<WorkloadLogs>({
+    enabled: Boolean(application),
+    queryKey: ["application", applicationId, "logs"],
+    refetchInterval: 5_000,
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${application!.projectId}/applications/${applicationId}/logs?tail=500`), { credentials: "include" });
+      if (!response.ok) throw new Error("Logs konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const metrics = useQuery<Metrics>({
+    enabled: Boolean(application),
+    queryKey: ["application", applicationId, "metrics", metricsRange, metricsDeploymentId, metricsWorkloadId],
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${application!.projectId}/applications/${applicationId}/metrics?range=${metricsRange}${metricsDeploymentId ? `&deploymentId=${metricsDeploymentId}` : ""}${metricsWorkloadId ? `&workloadId=${metricsWorkloadId}` : ""}`), { credentials: "include" });
+      if (!response.ok) throw new Error("Metriken konnten nicht geladen werden");
       return response.json();
     },
   });
@@ -278,6 +322,8 @@ export default function ApplicationDetailPage() {
     if (application) {
       setSourceReference(application.gitUrl ?? application.imageName ?? "");
       setSourceBranch(application.branch);
+      setGitCredentialReference(application.gitCredentialReference ?? "");
+      setRegistryCredentialReference(application.registryCredentialReference ?? "");
     }
   }, [application]);
   const saveDefaults = useMutation({
@@ -357,6 +403,7 @@ export default function ApplicationDetailPage() {
               internalPort: port.internalPort,
               protocol: port.protocol,
               exposure: port.exposure,
+              externalPort: port.externalPort,
             })),
           ),
         },
@@ -564,8 +611,8 @@ export default function ApplicationDetailPage() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(
             application!.sourceType === "git"
-              ? { gitUrl: sourceReference, branch: sourceBranch }
-              : { imageName: sourceReference },
+              ? { gitUrl: sourceReference, branch: sourceBranch, gitCredentialReference: gitCredentialReference || null }
+              : { imageName: sourceReference, registryCredentialReference: registryCredentialReference || null },
           ),
         },
       );
@@ -614,6 +661,11 @@ export default function ApplicationDetailPage() {
         workload.desiredState === "running",
     ) ?? false;
   const config = configuration.data;
+  const metricChartData = (metrics.data?.samples ?? []).map((sample) => ({
+    time: new Date(sample.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    cpu: sample.cpuAverage,
+    memoryMiB: sample.memoryAverageBytes / 1024 / 1024,
+  }));
   return (
     <div className="space-y-6 p-5 sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -655,6 +707,21 @@ export default function ApplicationDetailPage() {
               {running ? "Stoppen" : "Deploy"}
             </Button>
           ) : null}
+          {application.sourceType === "docker" ? (
+            <label className="mt-3 block text-xs text-zinc-400">
+              Registry-Credential <span className="text-zinc-600">(optional, JSON mit username und password)</span>
+              <select
+                value={registryCredentialReference}
+                onChange={(event) => setRegistryCredentialReference(event.target.value)}
+                className="mt-1.5 h-9 w-full rounded-lg border border-white/[0.1] bg-[#0b1217] px-2.5 text-xs text-zinc-100"
+              >
+                <option value="">Kein Credential</option>
+                {secretVariables.data?.map((variable: { id: string; key: string }) => (
+                  <option key={variable.id} value={variable.id}>{variable.key}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
       </div>
       {deployment.error || configuration.error || runtime.error ? (
@@ -689,14 +756,29 @@ export default function ApplicationDetailPage() {
             />
           </label>
           {application.sourceType === "git" ? (
-            <label className="mt-3 block text-xs text-zinc-400">
-              Branch
-              <input
-                value={sourceBranch}
-                onChange={(event) => setSourceBranch(event.target.value)}
-                className="mt-1.5 h-9 w-full rounded-lg border border-white/[0.1] bg-[#0b1217] px-2.5 font-mono text-xs text-zinc-100"
-              />
-            </label>
+            <>
+              <label className="mt-3 block text-xs text-zinc-400">
+                Branch
+                <input
+                  value={sourceBranch}
+                  onChange={(event) => setSourceBranch(event.target.value)}
+                  className="mt-1.5 h-9 w-full rounded-lg border border-white/[0.1] bg-[#0b1217] px-2.5 font-mono text-xs text-zinc-100"
+                />
+              </label>
+              <label className="mt-3 block text-xs text-zinc-400">
+                Git-Credential <span className="text-zinc-600">(optional)</span>
+                <select
+                  value={gitCredentialReference}
+                  onChange={(event) => setGitCredentialReference(event.target.value)}
+                  className="mt-1.5 h-9 w-full rounded-lg border border-white/[0.1] bg-[#0b1217] px-2.5 text-xs text-zinc-100"
+                >
+                  <option value="">Kein Credential</option>
+                  {secretVariables.data?.map((variable: { id: string; key: string }) => (
+                    <option key={variable.id} value={variable.id}>{variable.key}</option>
+                  ))}
+                </select>
+              </label>
+            </>
           ) : null}
           <Button
             size="sm"
@@ -752,6 +834,17 @@ export default function ApplicationDetailPage() {
           </p>
         </article>
       </section>
+      <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <div><h2 className="font-medium text-zinc-100">Workload-Metriken</h2><p className="mt-1 text-sm text-zinc-500">Vom Docker-Agenten gemeldet.</p></div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400"><label>Deployment <select value={metricsDeploymentId} onChange={(event) => { setMetricsDeploymentId(event.target.value); setMetricsWorkloadId(""); }} className="ml-1 max-w-36 rounded border border-white/[0.1] bg-[#0b1217] px-2 py-1 font-mono text-zinc-200"><option value="">Alle</option>{runtime.data?.deployments.map((deployment) => <option key={deployment.id} value={deployment.id}>v{deployment.version}</option>)}</select></label><label>Workload <select value={metricsWorkloadId} onChange={(event) => setMetricsWorkloadId(event.target.value)} className="ml-1 max-w-36 rounded border border-white/[0.1] bg-[#0b1217] px-2 py-1 font-mono text-zinc-200"><option value="">Alle</option>{runtime.data?.workloads.filter((workload) => !metricsDeploymentId || workload.deploymentId === metricsDeploymentId).map((workload) => <option key={workload.id} value={workload.id}>{workload.id.slice(0, 8)}</option>)}</select></label><label>Zeitraum <select value={metricsRange} onChange={(event) => setMetricsRange(event.target.value as typeof metricsRange)} className="ml-1 rounded border border-white/[0.1] bg-[#0b1217] px-2 py-1 text-zinc-200"><option value="15m">15 Min.</option><option value="1h">1 Std.</option><option value="6h">6 Std.</option><option value="24h">24 Std.</option><option value="7d">7 Tage</option></select></label></div>
+        </div>
+        {metrics.isLoading ? <p className="mt-4 text-sm text-zinc-500">Metriken werden geladen …</p> : null}
+        {metrics.error ? <p role="alert" className="mt-4 text-sm text-red-300">{metrics.error.message}</p> : null}
+        {!metrics.isLoading && !metrics.error && !(metrics.data?.samples.length) ? <p className="mt-4 text-sm text-zinc-500">Keine Metriken für diesen Zeitraum vorhanden.</p> : null}
+        {metrics.data?.samples.length ? (() => { const latest = metrics.data.samples.at(-1)!; const cpu = latest.cpuAverage === null ? "—" : `${latest.cpuAverage.toFixed(1)} %`; const mib = latest.memoryAverageBytes / 1024 / 1024; const net = (latest.networkRxBytesPerSecond + latest.networkTxBytesPerSecond) / 1024; const disk = (latest.diskReadBytesPerSecond + latest.diskWriteBytesPerSecond) / 1024; return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">CPU</p><p className="mt-1 text-lg font-semibold text-zinc-100">{cpu}</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Arbeitsspeicher</p><p className="mt-1 text-lg font-semibold text-zinc-100">{mib.toFixed(1)} MiB</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Netzwerk</p><p className="mt-1 text-lg font-semibold text-zinc-100">{net.toFixed(1)} KiB/s</p></div><div className="rounded-xl bg-white/[0.035] p-3"><p className="text-xs text-zinc-500">Datenträger-I/O</p><p className="mt-1 text-lg font-semibold text-zinc-100">{disk.toFixed(1)} KiB/s</p></div></div>; })() : null}
+      </section>
+      {metricChartData.length > 1 ? <ChartContainer className="-mt-5 h-56 w-full" config={{ cpu: { label: "CPU", color: "#00cec9" }, memoryMiB: { label: "Arbeitsspeicher", color: "#74b9ff" } }}><AreaChart data={metricChartData}><defs><linearGradient id="metric-cpu" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00cec9" stopOpacity={0.35} /><stop offset="95%" stopColor="#00cec9" stopOpacity={0} /></linearGradient><linearGradient id="metric-memory" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#74b9ff" stopOpacity={0.25} /><stop offset="95%" stopColor="#74b9ff" stopOpacity={0} /></linearGradient></defs><CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" /><XAxis dataKey="time" tickLine={false} axisLine={false} minTickGap={24} /><YAxis yAxisId="cpu" tickLine={false} axisLine={false} width={40} tickFormatter={(value) => `${value}%`} /><YAxis yAxisId="memory" orientation="right" tickLine={false} axisLine={false} width={52} tickFormatter={(value) => `${value}M`} /><ChartTooltip content={<ChartTooltipContent />} /><Area yAxisId="cpu" type="monotone" dataKey="cpu" stroke="#00cec9" fill="url(#metric-cpu)" connectNulls /><Area yAxisId="memory" type="monotone" dataKey="memoryMiB" stroke="#74b9ff" fill="url(#metric-memory)" /></AreaChart></ChartContainer> : null}
       <section className="grid gap-4 xl:grid-cols-2">
         <article className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
           <h2 className="font-medium text-zinc-100">Deployments</h2>
@@ -827,6 +920,27 @@ export default function ApplicationDetailPage() {
               ))}
           </div>
         </article>
+      </section>
+      <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
+        <h2 className="font-medium text-zinc-100">Aktivität</h2>
+        <div className="mt-4 divide-y divide-white/[0.06]">
+          {activity.isLoading ? <p className="py-4 text-sm text-zinc-500">Aktivität wird geladen …</p> : null}
+          {activity.data?.map((entry) => (
+            <article key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+              <div><p className="font-mono text-zinc-200">{entry.action}</p><p className="mt-1 text-xs text-zinc-500">{entry.actorName ?? entry.actorEmail ?? "System"}</p></div>
+              <time className="text-xs text-zinc-600">{new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.createdAt))}</time>
+            </article>
+          ))}
+          {!activity.isLoading && !activity.data?.length ? <p className="py-4 text-sm text-zinc-500">Noch keine Application-Aktivität vorhanden.</p> : null}
+        </div>
+      </section>
+      <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
+        <h2 className="font-medium text-zinc-100">Workload-Logs</h2>
+        {logs.isError ? <p role="alert" className="mt-3 text-sm text-red-300">{logs.error.message}</p> : null}
+        {!logs.isError && !logs.data?.workloads.length ? <p className="mt-3 text-sm text-zinc-500">Keine laufenden Workloads.</p> : null}
+        <div className="mt-4 space-y-4">
+          {logs.data?.workloads.map((workload) => <article key={workload.workloadId}><p className="mb-2 font-mono text-xs text-zinc-500">{workload.workloadId.slice(0, 8)} · {workload.status}</p><pre className="max-h-80 overflow-auto rounded-xl bg-[#080d10] p-3 font-mono text-xs leading-5 text-zinc-300">{workload.logs || "Logs werden vom Agenten abgefragt …"}</pre></article>)}
+        </div>
       </section>
       <section className="rounded-2xl border border-white/[0.08] bg-[#172128] p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -912,7 +1026,7 @@ export default function ApplicationDetailPage() {
             </div>
           ))}
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_140px_140px_auto]">
+        <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_120px_120px_140px_auto]">
           <input
             aria-label="Interner Port"
             type="number"
@@ -940,6 +1054,17 @@ export default function ApplicationDetailPage() {
             <option value="private">Private</option>
             <option value="public">Public</option>
           </select>
+          <input
+            aria-label="Externer Port"
+            type="number"
+            min="1"
+            max="65535"
+            value={newExternalPort}
+            onChange={(event) => setNewExternalPort(event.target.value)}
+            disabled={newExposure !== "public"}
+            placeholder="Dynamisch"
+            className="h-10 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 disabled:opacity-50"
+          />
           <Button
             onClick={() =>
               savePorts.mutate([
@@ -950,6 +1075,7 @@ export default function ApplicationDetailPage() {
                   internalPort: Number(newPort),
                   protocol: newProtocol,
                   exposure: newExposure,
+                  externalPort: newExposure === "public" && newExternalPort ? Number(newExternalPort) : null,
                 },
               ])
             }

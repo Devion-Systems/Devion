@@ -17,6 +17,9 @@ import {
   stopDeploymentController,
 } from "./modules/deployments/controller.js";
 import { startBuildController, stopBuildController } from "./modules/builds/controller.js";
+import { startMetricsRetentionController, stopMetricsRetentionController } from "./features/metrics/controller.js";
+import { startDomainRouteController, stopDomainRouteController } from "./features/routing/controller.js";
+import { startNodeLivenessController, stopNodeLivenessController } from "./modules/nodes/liveness-controller.js";
 import {
   corsMiddleware,
   globalErrorHandler,
@@ -84,6 +87,9 @@ const startServer = async () => {
   logger.info({ port }, `Devion API server starting on port ${port}`);
   startDeploymentController(logger);
   startBuildController(logger);
+  startMetricsRetentionController(logger);
+  startDomainRouteController(logger);
+  startNodeLivenessController(logger);
 };
 
 startServer();
@@ -93,6 +99,9 @@ const shutdown = async () => {
   logger.info("Shutting down gracefully...");
   stopDeploymentController();
   stopBuildController();
+  stopMetricsRetentionController();
+  stopDomainRouteController();
+  stopNodeLivenessController();
   await closeDbPool();
   logger.info("Database pool closed");
   process.exit(0);

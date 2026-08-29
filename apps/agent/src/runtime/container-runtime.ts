@@ -6,13 +6,14 @@ export interface ContainerStartSpec {
   cpuMilli: number;
   memoryMib: number;
   environment?: Record<string, string>;
-  ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp"; exposure?: "private" | "public" }>;
+  ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp"; exposure?: "private" | "public"; externalPort?: number }>;
   volumes?: Array<{ name: string; target: string; readOnly?: boolean }>;
   restartPolicy?: "no" | "on-failure" | "always" | "unless-stopped";
   gracefulShutdownSeconds?: number;
   command?: string;
   workingDirectory?: string;
   healthCheck?: { command: string; intervalSeconds: number; timeoutSeconds: number; retries: number; startPeriodSeconds: number };
+  registryCredentials?: { username: string; password: string };
 }
 
 /** Docker Engine API adapter. The agent is the only process that accesses its local socket. */
@@ -23,15 +24,26 @@ export class ContainerRuntime {
     spec: ContainerStartSpec,
   ): Promise<{ runtimeId: string; ports: Record<string, number> }> {
     const name = `devion-workload-${spec.workloadId.replaceAll("-", "")}`;
-    await this.removeIfPresent(name);
-    await this.request("POST", `/images/create?fromImage=${encodeURIComponent(spec.image)}`);
+    try {
+      const existing = await this.request<{
+        State?: { Running?: boolean };
+        NetworkSettings?: { Ports?: Record<string, Array<{ HostPort: string }> | null> };
+      }>("GET", `/containers/${encodeURIComponent(name)}/json`);
+      if (existing.State?.Running) {
+        return { runtimeId: name, ports: publishedPorts(existing.NetworkSettings?.Ports) };
+      }
+      await this.removeIfPresent(name);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith("Docker API 404:")) throw error;
+    }
+    await this.request("POST", `/images/create?fromImage=${encodeURIComponent(spec.image)}`, undefined, registryAuthHeaders(spec.image, spec.registryCredentials));
     const exposedPorts = Object.fromEntries(
       (spec.ports ?? []).map((port) => [`${port.containerPort}/${port.protocol ?? "tcp"}`, {}]),
     );
     const portBindings = Object.fromEntries(
       (spec.ports ?? []).filter((port) => port.exposure === "public").map((port) => [
         `${port.containerPort}/${port.protocol ?? "tcp"}`,
-        [{ HostIp: "0.0.0.0", HostPort: "" }],
+        [{ HostIp: "0.0.0.0", HostPort: port.externalPort ? String(port.externalPort) : "" }],
       ]),
     );
     for (const volume of spec.volumes ?? []) {
@@ -72,12 +84,7 @@ export class ContainerRuntime {
     const inspection = await this.request<{
       NetworkSettings?: { Ports?: Record<string, Array<{ HostPort: string }> | null> };
     }>("GET", `/containers/${encodeURIComponent(name)}/json`);
-    const ports = Object.fromEntries(
-      Object.entries(inspection.NetworkSettings?.Ports ?? {}).flatMap(
-        ([containerPort, bindings]) =>
-          bindings?.[0]?.HostPort ? [[containerPort, Number(bindings[0].HostPort)]] : [],
-      ),
-    );
+    const ports = publishedPorts(inspection.NetworkSettings?.Ports);
     return { runtimeId: name, ports };
   }
 
@@ -88,15 +95,47 @@ export class ContainerRuntime {
     );
   }
 
-  async inspect(workloadId: string): Promise<{ actualState: "running" | "stopped" | "failed" | "unknown"; healthStatus: "none" | "starting" | "healthy" | "unhealthy" }> {
+  async inspect(workloadId: string): Promise<{ actualState: "running" | "stopped" | "failed" | "unknown"; healthStatus: "none" | "starting" | "healthy" | "unhealthy"; ports: Record<string, number> }> {
     try {
-      const container = await this.request<{ State?: { Running?: boolean; Dead?: boolean; Error?: string; Health?: { Status?: string } } }>("GET", `/containers/${encodeURIComponent(this.name(workloadId))}/json`);
+      const container = await this.request<{ State?: { Running?: boolean; Dead?: boolean; Error?: string; Health?: { Status?: string } }; NetworkSettings?: { Ports?: Record<string, Array<{ HostPort: string }> | null> } }>("GET", `/containers/${encodeURIComponent(this.name(workloadId))}/json`);
       const health = container.State?.Health?.Status;
       const healthStatus = health === "starting" || health === "healthy" || health === "unhealthy" ? health : "none";
-      return { actualState: container.State?.Running ? "running" : container.State?.Dead || container.State?.Error ? "failed" : "stopped", healthStatus };
+      return { actualState: container.State?.Running ? "running" : container.State?.Dead || container.State?.Error ? "failed" : "stopped", healthStatus, ports: publishedPorts(container.NetworkSettings?.Ports) };
     } catch (error) {
-      if (error instanceof Error && error.message.includes("404")) return { actualState: "stopped", healthStatus: "none" };
-      return { actualState: "unknown", healthStatus: "none" };
+      if (error instanceof Error && error.message.includes("404")) return { actualState: "stopped", healthStatus: "none", ports: {} };
+      return { actualState: "unknown", healthStatus: "none", ports: {} };
+    }
+  }
+
+  async metrics(workloadId: string): Promise<{
+    cpuTotalUsageNanos: number;
+    memoryUsageBytes: number;
+    memoryLimitBytes: number | null;
+    networkRxBytes: number;
+    networkTxBytes: number;
+    diskReadBytes: number;
+    diskWriteBytes: number;
+  } | null> {
+    try {
+      const stats = await this.request<{
+        cpu_stats?: { cpu_usage?: { total_usage?: number } };
+        memory_stats?: { usage?: number; limit?: number };
+        networks?: Record<string, { rx_bytes?: number; tx_bytes?: number }>;
+        blkio_stats?: { io_service_bytes_recursive?: Array<{ op?: string; value?: number }> };
+      }>("GET", `/containers/${encodeURIComponent(this.name(workloadId))}/stats?stream=false`);
+      const io = stats.blkio_stats?.io_service_bytes_recursive ?? [];
+      return {
+        cpuTotalUsageNanos: finiteNonNegative(stats.cpu_stats?.cpu_usage?.total_usage),
+        memoryUsageBytes: finiteNonNegative(stats.memory_stats?.usage),
+        memoryLimitBytes: stats.memory_stats?.limit && Number.isFinite(stats.memory_stats.limit) ? stats.memory_stats.limit : null,
+        networkRxBytes: sum(Object.values(stats.networks ?? {}).map((network) => network.rx_bytes)),
+        networkTxBytes: sum(Object.values(stats.networks ?? {}).map((network) => network.tx_bytes)),
+        diskReadBytes: sum(io.filter((item) => item.op?.toLowerCase() === "read").map((item) => item.value)),
+        diskWriteBytes: sum(io.filter((item) => item.op?.toLowerCase() === "write").map((item) => item.value)),
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("404")) return null;
+      throw error;
     }
   }
 
@@ -168,7 +207,7 @@ export class ContainerRuntime {
     }
   }
 
-  private request<T = void>(method: string, path: string, body?: unknown): Promise<T> {
+  private request<T = void>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
       const request = http.request(
@@ -176,9 +215,7 @@ export class ContainerRuntime {
           socketPath: this.socketPath,
           method,
           path: `/v1.45${path}`,
-          headers: payload
-            ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) }
-            : undefined,
+          headers: { ...(payload ? { "content-type": "application/json", "content-length": String(Buffer.byteLength(payload)) } : {}), ...headers },
         },
         (response) => {
           let output = "";
@@ -241,6 +278,28 @@ export class ContainerRuntime {
       request.end();
     });
   }
+}
+
+function finiteNonNegative(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+function sum(values: unknown[]): number {
+  return values.reduce<number>((total, value) => total + finiteNonNegative(value), 0);
+}
+
+function registryAuthHeaders(image: string, credentials: { username: string; password: string } | undefined): Record<string, string> | undefined {
+  if (!credentials) return undefined;
+  const first = image.split("/")[0] ?? "";
+  const serveraddress = first.includes(".") || first.includes(":") || first === "localhost" ? first : "https://index.docker.io/v1/";
+  return { "x-registry-auth": Buffer.from(JSON.stringify({ ...credentials, serveraddress })).toString("base64") };
+}
+
+function publishedPorts(ports: Record<string, Array<{ HostPort: string }> | null> | undefined): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(ports ?? {}).flatMap(([containerPort, bindings]) =>
+      bindings?.[0]?.HostPort ? [[containerPort, Number(bindings[0].HostPort)]] : [],
+    ),
+  );
 }
 
 function decodeDockerLogFrames(data: Buffer): string {

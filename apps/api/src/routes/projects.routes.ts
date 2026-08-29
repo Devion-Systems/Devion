@@ -1,4 +1,4 @@
-import { applicationDeployments, applications, auditLogs, builds, db, deployments, managedDatabases, member, organization, projectDomains, projectEnvironments, projectTeams, projects, team, user } from "@repo/db";
+import { applicationDeployments, applicationPorts, applications, auditLogs, builds, db, deployments, managedDatabases, member, organization, projectDomains, projectEnvironments, projectTeams, projects, team, user } from "@repo/db";
 import { and, asc, count, desc, eq, inArray, like, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import { auth } from "../features/auth/config.js";
 import { resolveRolePermissions } from "../features/organizations/permissions.js";
 import { DnsManager } from "../lib/network/dns.js";
 import { type TraefikDomain, TraefikManager } from "../lib/network/traefik.js";
+import { resolveWorkloadUpstreams } from "../features/routing/workload-upstreams.js";
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import { listAccessibleProjects, resolveProjectAccess } from "../features/projects/access.js";
 import type { AppEnv } from "../types/env.js";
@@ -55,40 +56,86 @@ const hostnameSchema = z
 const domainInputSchema = z.object({
   hostname: hostnameSchema,
   environment: z.string().trim().min(1).max(32).default("production"),
+  applicationId: z.string().uuid(),
+  deploymentId: z.string().uuid().optional().nullable(),
+  targetPort: z.number().int().min(1).max(65_535),
+  upstreamProtocol: z.enum(["http", "https"]).default("http"),
 });
 
 const TRAEFIK_ENABLED = process.env.TRAEFIK_ENABLED === "true";
 const traefik = TRAEFIK_ENABLED ? new TraefikManager() : null;
 const dnsManager = new DnsManager(process.env.TRAEFIK_PUBLIC_IP, process.env.TRAEFIK_CNAME_TARGET);
 
-function resolveProjectUpstream(project: { slug: string; routingTargetUrl: string | null }) {
-  if (project.routingTargetUrl) return project.routingTargetUrl;
-  const template = process.env.TRAEFIK_PROJECT_UPSTREAM_TEMPLATE;
-  if (!template) throw new Error("No deployment upstream is configured for this project");
-  return template.replaceAll("{projectSlug}", project.slug);
+async function setDomainRouteStatus(domain: typeof projectDomains.$inferSelect, status: "active" | "failed"): Promise<void> {
+  if (domain.status === status) return;
+  await db.transaction(async (tx) => {
+    await tx.update(projectDomains).set({ status }).where(eq(projectDomains.id, domain.id));
+    await tx.insert(auditLogs).values({
+      id: crypto.randomUUID(),
+      actorId: null,
+      action: status === "active" ? "domain.route_available" : "domain.route_unavailable",
+      targetType: "domain",
+      targetId: domain.id,
+      metadata: JSON.stringify({ projectId: domain.projectId, hostname: domain.hostname }),
+    });
+  });
 }
 
-async function syncTraefikRoutes(
-  project: { id: string; slug: string; routingTargetUrl: string | null },
-  domains: TraefikDomain[],
-) {
+async function syncTraefikRoutes(projectId: string): Promise<boolean> {
   if (!traefik) throw new Error("Traefik domain routing is disabled");
-  await traefik.syncProjectRoutes(
-    {
-      projectId: project.id,
-      projectSlug: project.slug,
-      targetUrl: resolveProjectUpstream(project),
-    },
-    domains,
-  );
+  const domains = await db.select().from(projectDomains).where(eq(projectDomains.projectId, projectId));
+  // Do not rewrite a project's shared file while it still contains an active
+  // legacy domain. That preserves an existing production route until each
+  // hostname has been explicitly migrated to an Application/Port target.
+  if (domains.some((domain) => domain.routingMigrationState === "legacy" && domain.status === "active")) return false;
+  const routes: TraefikDomain[] = [];
+  for (const domain of domains) {
+    if (domain.status === "pending") continue;
+    if (!domain.applicationId || !domain.targetPort || !domain.upstreamProtocol) {
+      await setDomainRouteStatus(domain, "failed");
+      continue;
+    }
+    try {
+      const upstreams = await resolveWorkloadUpstreams({
+        applicationId: domain.applicationId,
+        deploymentId: domain.deploymentId,
+        targetPort: domain.targetPort,
+        upstreamProtocol: domain.upstreamProtocol,
+        organizationId: domain.organizationId,
+      });
+      if (upstreams.length === 0) {
+        await setDomainRouteStatus(domain, "failed");
+        continue;
+      }
+      await setDomainRouteStatus(domain, "active");
+      routes.push({ id: domain.id, hostname: domain.hostname, upstreams });
+    } catch {
+      await setDomainRouteStatus(domain, "failed");
+    }
+  }
+  await traefik.syncProjectRoutes({ projectId }, routes);
+  return true;
 }
 
-function activeDomains<T extends TraefikDomain & { status: string }>(
-  domains: T[],
-): TraefikDomain[] {
-  return domains
-    .filter((domain) => domain.status === "active")
-    .map(({ id, hostname }) => ({ id, hostname }));
+/** Periodic reconciliation also withdraws unhealthy/offline workload backends. */
+export async function reconcileProjectDomainRoutes(projectId: string): Promise<void> {
+  await syncTraefikRoutes(projectId);
+}
+
+async function validateDomainTarget(projectId: string, value: { applicationId?: string; deploymentId?: string | null; targetPort?: number }) {
+  if (!value.applicationId) return;
+  const application = await db.query.applications.findFirst({
+    where: and(eq(applications.id, value.applicationId), eq(applications.projectId, projectId)),
+  });
+  if (!application) throw new Error("Application target does not belong to this project");
+  if (!value.targetPort) throw new Error("Domain target requires a port");
+  const port = await db.query.applicationPorts.findFirst({ where: and(eq(applicationPorts.applicationId, application.id), eq(applicationPorts.internalPort, value.targetPort), eq(applicationPorts.protocol, "tcp"), eq(applicationPorts.exposure, "public")) });
+  if (!port) throw new Error("Domain target port must be a public TCP application port");
+  if (!value.deploymentId) return;
+  const deployment = await db.query.deployments.findFirst({
+    where: and(eq(deployments.id, value.deploymentId), eq(deployments.applicationId, application.id)),
+  });
+  if (!deployment) throw new Error("Deployment target does not belong to this application");
 }
 
 const projectRoutes = new Hono<AppEnv>();
@@ -409,6 +456,11 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains", async (c) => {
   if (access.project.status === "archived") return c.json({ error: "Archived projects cannot receive new domains" }, 409);
   const payload = domainInputSchema.safeParse(await c.req.json());
   if (!payload.success) return c.json({ error: "Invalid hostname" }, 400);
+  try {
+    await validateDomainTarget(access.project.id, payload.data);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid domain target" }, 400);
+  }
 
   const id = crypto.randomUUID();
   const existingDomains = await db
@@ -439,21 +491,12 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains", async (c) => {
   if (process.env.TRAEFIK_PUBLIC_IP || process.env.TRAEFIK_CNAME_TARGET) {
     const verified = await dnsManager.verifyDomain(payload.data.hostname);
     if (verified) {
-      const allDomains = await db
-        .select({
-          id: projectDomains.id,
-          hostname: projectDomains.hostname,
-          status: projectDomains.status,
-        })
-        .from(projectDomains)
-        .where(eq(projectDomains.projectId, access.project.id));
       try {
-        await syncTraefikRoutes(access.project, [
-          ...activeDomains(allDomains.filter((domain) => domain.id !== id)),
-          { id, hostname: payload.data.hostname },
-        ]);
         await db.update(projectDomains).set({ status: "active" }).where(eq(projectDomains.id, id));
-        return c.json({ id, ...payload.data, status: "active" }, 201);
+        const published = await syncTraefikRoutes(access.project.id);
+        if (!published) await db.update(projectDomains).set({ status: "pending" }).where(eq(projectDomains.id, id));
+        const current = await db.query.projectDomains.findFirst({ where: eq(projectDomains.id, id) });
+        return c.json({ id, ...payload.data, status: current?.status ?? "failed" }, 201);
       } catch (error) {
         c.get("logger").error(
           { error, projectId: access.project.id, hostname: payload.data.hostname },
@@ -486,23 +529,26 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     ),
   });
   if (!current) return c.json({ error: "Domain not found" }, 404);
+  if (current.routingMigrationState === "legacy" && (!payload.data.applicationId || !payload.data.targetPort || !payload.data.upstreamProtocol))
+    return c.json({ error: "Legacy domains must be migrated with applicationId, targetPort, and upstreamProtocol together" }, 400);
+  try {
+    await validateDomainTarget(access.project.id, {
+      applicationId: payload.data.applicationId ?? current.applicationId ?? undefined,
+      deploymentId: payload.data.deploymentId ?? current.deploymentId,
+      targetPort: payload.data.targetPort ?? current.targetPort ?? undefined,
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid domain target" }, 400);
+  }
 
-  const update = payload.data.hostname
-    ? { ...payload.data, status: "pending" as const, sslExpiresAt: null }
-    : payload.data;
-  const allDomains = await db
-    .select({
-      id: projectDomains.id,
-      hostname: projectDomains.hostname,
-      status: projectDomains.status,
-    })
-    .from(projectDomains)
-    .where(eq(projectDomains.projectId, access.project.id));
-  const nextDomains = allDomains.map((domain) =>
-    domain.id === current.id
-      ? { ...domain, hostname: payload.data.hostname ?? domain.hostname }
-      : domain,
-  );
+  const targetWasSupplied = payload.data.applicationId !== undefined || payload.data.targetPort !== undefined || payload.data.deploymentId !== undefined || payload.data.upstreamProtocol !== undefined;
+  const update = {
+    ...payload.data,
+    ...(payload.data.hostname ? { status: "pending" as const, sslExpiresAt: null } : {}),
+    ...(targetWasSupplied ? { routingMigrationState: "target" as const } : {}),
+  };
+  const allDomains = await db.select({ id: projectDomains.id, hostname: projectDomains.hostname }).from(projectDomains).where(eq(projectDomains.projectId, access.project.id));
+  const nextDomains = allDomains.map((domain) => domain.id === current.id ? { ...domain, hostname: payload.data.hostname ?? domain.hostname } : domain);
   if (
     payload.data.hostname &&
     nextDomains.some(
@@ -510,24 +556,6 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
     )
   ) {
     return c.json({ error: "Hostname is already assigned to this project" }, 409);
-  }
-  try {
-    // A changed hostname must be verified again, so remove its old active
-    // route now and wait for the explicit verification before publishing it.
-    await syncTraefikRoutes(
-      access.project,
-      activeDomains(
-        payload.data.hostname
-          ? nextDomains.filter((domain) => domain.id !== current.id)
-          : nextDomains,
-      ),
-    );
-  } catch (error) {
-    c.get("logger").error(
-      { error, projectId: access.project.id },
-      "Unable to update Traefik domain route",
-    );
-    return c.json({ error: "Domain route could not be configured" }, 503);
   }
   const result = await db
     .update(projectDomains)
@@ -539,7 +567,20 @@ projectRoutes.patch("/:orgSlug/projects/:projectId/domains/:domainId", async (c)
       ),
     )
     .returning();
-  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "domain.updated", targetType: "domain", targetId: current.id, metadata: JSON.stringify({ projectId: access.project.id }) });
+  try {
+    const published = await syncTraefikRoutes(access.project.id);
+    // An active legacy domain deliberately preserves the old project config.
+    // Do not claim this changed target is live until its config can be published.
+    if (!published) {
+      await db.update(projectDomains).set({ status: "pending" }).where(eq(projectDomains.id, current.id));
+      result[0]!.status = "pending";
+    }
+  }
+  catch (error) {
+    c.get("logger").error({ error, projectId: access.project.id }, "Unable to update Traefik domain route");
+    return c.json({ error: "Domain was updated but its route could not be reconciled" }, 503);
+  }
+  await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "domain.updated", targetType: "domain", targetId: current.id, metadata: JSON.stringify({ projectId: access.project.id, fields: Object.keys(update) }) });
   return c.json(result[0]);
 });
 
@@ -558,26 +599,6 @@ projectRoutes.delete("/:orgSlug/projects/:projectId/domains/:domainId", async (c
     ),
   });
   if (!current) return c.json({ error: "Domain not found" }, 404);
-  const remainingDomains = await db
-    .select({
-      id: projectDomains.id,
-      hostname: projectDomains.hostname,
-      status: projectDomains.status,
-    })
-    .from(projectDomains)
-    .where(eq(projectDomains.projectId, access.project.id));
-  try {
-    await syncTraefikRoutes(
-      access.project,
-      activeDomains(remainingDomains.filter((domain) => domain.id !== current.id)),
-    );
-  } catch (error) {
-    c.get("logger").error(
-      { error, projectId: access.project.id },
-      "Unable to remove Traefik domain route",
-    );
-    return c.json({ error: "Domain route could not be removed" }, 503);
-  }
   const result = await db
     .delete(projectDomains)
     .where(
@@ -588,6 +609,10 @@ projectRoutes.delete("/:orgSlug/projects/:projectId/domains/:domainId", async (c
     )
     .returning({ id: projectDomains.id });
   if (!result[0]) return c.json({ error: "Domain not found" }, 404);
+  try { await syncTraefikRoutes(access.project.id); }
+  catch (error) {
+    c.get("logger").error({ error, projectId: access.project.id }, "Unable to remove Traefik domain route");
+  }
   await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "domain.deleted", targetType: "domain", targetId: current.id, metadata: JSON.stringify({ projectId: access.project.id, hostname: current.hostname }) });
   return c.body(null, 204);
 });
@@ -613,19 +638,10 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains/:domainId/verify", asy
 
   const verified = await dnsManager.verifyDomain(domain.hostname);
   if (verified) {
-    const allDomains = await db
-      .select({
-        id: projectDomains.id,
-        hostname: projectDomains.hostname,
-        status: projectDomains.status,
-      })
-      .from(projectDomains)
-      .where(eq(projectDomains.projectId, access.project.id));
     try {
-      await syncTraefikRoutes(access.project, [
-        ...activeDomains(allDomains.filter((item) => item.id !== domain.id)),
-        { id: domain.id, hostname: domain.hostname },
-      ]);
+      await db.update(projectDomains).set({ status: "active" }).where(eq(projectDomains.id, domain.id));
+      const published = await syncTraefikRoutes(access.project.id);
+      if (!published) await db.update(projectDomains).set({ status: "pending" }).where(eq(projectDomains.id, domain.id));
     } catch (error) {
       c.get("logger").error(
         { error, projectId: access.project.id, hostname: domain.hostname },
@@ -634,11 +650,9 @@ projectRoutes.post("/:orgSlug/projects/:projectId/domains/:domainId/verify", asy
       return c.json({ error: "Domain was verified but could not be published" }, 503);
     }
   }
-  const [result] = await db
-    .update(projectDomains)
-    .set({ status: verified ? "active" : "pending" })
-    .where(eq(projectDomains.id, domain.id))
-    .returning();
+  const [result] = verified
+    ? await db.select().from(projectDomains).where(eq(projectDomains.id, domain.id)).limit(1)
+    : await db.update(projectDomains).set({ status: "pending" }).where(eq(projectDomains.id, domain.id)).returning();
   if (verified) await db.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "domain.verified", targetType: "domain", targetId: domain.id, metadata: JSON.stringify({ projectId: access.project.id, hostname: domain.hostname }) });
   return c.json(result);
 });

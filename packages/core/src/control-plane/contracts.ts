@@ -48,6 +48,8 @@ export interface WorkloadRequirements {
   architecture?: string;
   region?: string;
   requiredLabels?: Record<string, string>;
+  /** Persistent local volumes are tied to the node that first created them. */
+  requiredNodeId?: string;
 }
 
 export interface SchedulingDecision {
@@ -66,6 +68,7 @@ export type AgentCommandType =
   | "volume.attach"
   | "volume.detach"
   | "runtime.inspect"
+  | "workload.logs"
   | "minecraft.command"
   | "minecraft.logs"
   | "minecraft.files.list"

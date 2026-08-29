@@ -24,7 +24,14 @@ type ProjectDomain = {
   status: DomainStatus;
   sslExpiresAt: string | null;
   createdAt: string;
+  applicationId: string | null;
+  deploymentId: string | null;
+  targetPort: number | null;
+  upstreamProtocol: "http" | "https" | null;
+  routingMigrationState: "target" | "legacy";
 };
+type Application = { id: string; name: string; projectId: string };
+type ApplicationConfiguration = { ports: Array<{ internalPort: number; protocol: string; exposure: string }> };
 
 const hostnamePattern =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -48,6 +55,9 @@ export default function DomainsPage() {
   const [editing, setEditing] = useState<ProjectDomain | null>(null);
   const [hostname, setHostname] = useState("");
   const [environment, setEnvironment] = useState("production");
+  const [applicationId, setApplicationId] = useState("");
+  const [targetPort, setTargetPort] = useState("");
+  const [upstreamProtocol, setUpstreamProtocol] = useState<"http" | "https">("http");
   const [formError, setFormError] = useState<string | null>(null);
 
   const domains = useQuery<ProjectDomain[]>({
@@ -62,10 +72,13 @@ export default function DomainsPage() {
       return response.json();
     },
   });
+  const applications = useQuery<Application[]>({ queryKey: ["org", orgSlug, "applications"], queryFn: async () => { const response = await fetch(apiUrl(`/organizations/${orgSlug}/applications`), { credentials: "include" }); if (!response.ok) throw new Error("Applications konnten nicht geladen werden."); return response.json(); } });
+  const selectedApplication = applications.data?.find((application) => application.id === applicationId);
+  const configuration = useQuery<ApplicationConfiguration>({ enabled: Boolean(selectedApplication), queryKey: ["application", applicationId, "configuration"], queryFn: async () => { const response = await fetch(apiUrl(`/organizations/${orgSlug}/projects/${projectId}/applications/${applicationId}/configuration`), { credentials: "include" }); if (!response.ok) throw new Error("Ports konnten nicht geladen werden."); return response.json(); } });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey });
   const createDomain = useMutation({
-    mutationFn: async (payload: { hostname: string; environment: string }) => {
+    mutationFn: async (payload: { hostname: string; environment: string; applicationId: string; targetPort: number; upstreamProtocol: "http" | "https" }) => {
       const response = await fetch(
         apiUrl(`/organizations/${orgSlug}/projects/${projectId}/domains`),
         {
@@ -98,10 +111,7 @@ export default function DomainsPage() {
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            hostname: payload.hostname,
-            environment: payload.environment,
-          }),
+          body: JSON.stringify({ hostname: payload.hostname, environment: payload.environment, applicationId: payload.applicationId, deploymentId: payload.deploymentId, targetPort: payload.targetPort, upstreamProtocol: payload.upstreamProtocol }),
         },
       );
       if (!response.ok)
@@ -153,19 +163,24 @@ export default function DomainsPage() {
       );
       return;
     }
+    if (!applicationId || !targetPort) { setFormError("Bitte wähle eine Application und einen öffentlichen TCP-Port."); return; }
     if (editing)
       updateDomain.mutate({
         ...editing,
         hostname: normalizedHostname,
         environment,
+        applicationId,
+        targetPort: Number(targetPort),
+        upstreamProtocol,
       });
-    else createDomain.mutate({ hostname: normalizedHostname, environment });
+    else createDomain.mutate({ hostname: normalizedHostname, environment, applicationId, targetPort: Number(targetPort), upstreamProtocol });
   }
 
   function openCreate() {
     setEditing(null);
     setHostname("");
     setEnvironment("production");
+    setApplicationId(""); setTargetPort(""); setUpstreamProtocol("http");
     setFormError(null);
     setIsCreating(true);
   }
@@ -174,6 +189,7 @@ export default function DomainsPage() {
     setEditing(domain);
     setHostname(domain.hostname);
     setEnvironment(domain.environment);
+    setApplicationId(domain.applicationId ?? ""); setTargetPort(domain.targetPort ? String(domain.targetPort) : ""); setUpstreamProtocol(domain.upstreamProtocol ?? "http");
     setFormError(null);
     setIsCreating(true);
   }
@@ -208,7 +224,7 @@ export default function DomainsPage() {
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
+          <div className="grid gap-3 sm:grid-cols-2">
             <input
               value={hostname}
               onChange={(event) => setHostname(event.target.value)}
@@ -227,6 +243,9 @@ export default function DomainsPage() {
               <option value="staging">Staging</option>
               <option value="development">Development</option>
             </select>
+            <select value={applicationId} onChange={(event) => { setApplicationId(event.target.value); setTargetPort(""); }} className="h-9 rounded-lg border border-white/[0.1] bg-[#1e272e] px-3 text-sm text-zinc-200"><option value="">Application auswählen</option>{applications.data?.filter((application) => application.projectId === projectId).map((application) => <option key={application.id} value={application.id}>{application.name}</option>)}</select>
+            <select value={targetPort} onChange={(event) => setTargetPort(event.target.value)} disabled={!applicationId} className="h-9 rounded-lg border border-white/[0.1] bg-[#1e272e] px-3 text-sm text-zinc-200"><option value="">Öffentlichen TCP-Port auswählen</option>{configuration.data?.ports.filter((port) => port.protocol === "tcp" && port.exposure === "public").map((port) => <option key={port.internalPort} value={port.internalPort}>{port.internalPort}/tcp</option>)}</select>
+            <select value={upstreamProtocol} onChange={(event) => setUpstreamProtocol(event.target.value as "http" | "https")} className="h-9 rounded-lg border border-white/[0.1] bg-[#1e272e] px-3 text-sm text-zinc-200"><option value="http">HTTP upstream</option><option value="https">HTTPS upstream</option></select>
             <Button size="sm" onClick={submit} disabled={saving}>
               {saving && (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -264,6 +283,7 @@ export default function DomainsPage() {
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                     <span>{domain.environment}</span>
+                    {domain.routingMigrationState === "legacy" ? <span className="text-amber-300">Migration erforderlich: Application und Port auswählen</span> : null}
                     <span
                       className={
                         domain.status === "active"

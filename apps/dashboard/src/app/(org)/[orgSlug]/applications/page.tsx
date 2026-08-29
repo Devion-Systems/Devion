@@ -44,6 +44,7 @@ type Application = {
   updatedAt: string;
 };
 type Build = { id: string; status: string; branch: string; commitSha: string | null; imageDigest: string | null; errorMessage: string | null; trigger: string; createdAt: string; startedAt: string | null; completedAt: string | null };
+type ApplicationPage = { items: Application[]; page: number; limit: number; total: number; totalPages: number };
 
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 const dateTime = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" });
@@ -69,6 +70,7 @@ export default function ApplicationsPage() {
   const [filterSourceType, setFilterSourceType] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterType, setFilterType] = useState("");
+  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [name, setName] = useState("");
@@ -94,8 +96,8 @@ export default function ApplicationsPage() {
       return (await response.json()).items as Project[];
     },
   });
-  const applications = useQuery<Application[]>({
-    queryKey: ["org", orgSlug, "applications", search, filterProjectId, filterSourceType, filterStatus, filterType],
+  const applications = useQuery<ApplicationPage>({
+    queryKey: ["org", orgSlug, "applications", search, filterProjectId, filterSourceType, filterStatus, filterType, page],
     queryFn: async () => {
       const query = new URLSearchParams();
       if (search) query.set("search", search);
@@ -103,6 +105,8 @@ export default function ApplicationsPage() {
       if (filterSourceType) query.set("sourceType", filterSourceType);
       if (filterStatus) query.set("status", filterStatus);
       if (filterType) query.set("type", filterType);
+      query.set("page", String(page));
+      query.set("limit", "25");
       const response = await fetch(api(`/organizations/${orgSlug}/applications${query.size ? `?${query}` : ""}`), { credentials: "include" });
       if (!response.ok) throw new Error("Anwendungen konnten nicht geladen werden");
       return response.json();
@@ -263,10 +267,7 @@ export default function ApplicationsPage() {
     },
   });
 
-  const visible = useMemo(
-    () => (applications.data ?? []).filter((item) => `${item.name} ${item.projectName} ${item.description ?? ""} ${sourceLabel(item)}`.toLowerCase().includes(search.toLowerCase())),
-    [applications.data, search],
-  );
+  const visible = useMemo(() => applications.data?.items ?? [], [applications.data]);
   const canSubmit = Boolean(projectId && name.trim() && branch.trim() && (sourceType === "git" ? gitUrl.trim() : imageName.trim()));
   const hasProjects = (projects.data?.length ?? 0) > 0;
 
@@ -397,12 +398,12 @@ export default function ApplicationsPage() {
           <div className="flex w-full flex-wrap gap-2 lg:w-auto">
           <div className="relative min-w-52 flex-1 sm:w-72">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Workloads suchen …" className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] pl-9 pr-3 text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#81ecec]/70 focus:ring-2 focus:ring-[#81ecec]/20" />
+            <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Workloads suchen …" className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] pl-9 pr-3 text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-[#81ecec]/70 focus:ring-2 focus:ring-[#81ecec]/20" />
           </div>
-          <select value={filterProjectId} onChange={(event) => setFilterProjectId(event.target.value)} aria-label="Projekt filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Projekte</option>{(projects.data ?? []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
-          <select value={filterSourceType} onChange={(event) => setFilterSourceType(event.target.value)} aria-label="Quelle filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Quellen</option><option value="git">Git</option><option value="docker">Image</option></select>
-          <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)} aria-label="Status filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Stati</option><option value="active">Aktiv</option><option value="archived">Archiviert</option></select>
-          <select value={filterType} onChange={(event) => setFilterType(event.target.value)} aria-label="Typ filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Typen</option><option value="web">Web</option><option value="api">API</option><option value="worker">Worker</option><option value="game_server">Game Server</option><option value="custom">Custom</option></select>
+          <select value={filterProjectId} onChange={(event) => { setFilterProjectId(event.target.value); setPage(1); }} aria-label="Projekt filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Projekte</option>{(projects.data ?? []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+          <select value={filterSourceType} onChange={(event) => { setFilterSourceType(event.target.value); setPage(1); }} aria-label="Quelle filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Quellen</option><option value="git">Git</option><option value="docker">Image</option></select>
+          <select value={filterStatus} onChange={(event) => { setFilterStatus(event.target.value); setPage(1); }} aria-label="Status filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Stati</option><option value="active">Aktiv</option><option value="archived">Archiviert</option></select>
+          <select value={filterType} onChange={(event) => { setFilterType(event.target.value); setPage(1); }} aria-label="Typ filtern" className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-zinc-300"><option value="">Alle Typen</option><option value="web">Web</option><option value="api">API</option><option value="worker">Worker</option><option value="game_server">Game Server</option><option value="custom">Custom</option></select>
           </div>
         </div>
 
@@ -487,6 +488,15 @@ export default function ApplicationsPage() {
                 </article>
               ))}
             </div>
+            {applications.data && applications.data.totalPages > 1 ? (
+              <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] px-5 py-4 text-sm text-zinc-400">
+                <span>{applications.data.total} Anwendungen · Seite {applications.data.page} von {applications.data.totalPages}</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" disabled={applications.data.page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Zurück</Button>
+                  <Button size="sm" variant="outline" disabled={applications.data.page >= applications.data.totalPages} onClick={() => setPage((current) => current + 1)}>Weiter</Button>
+                </div>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>

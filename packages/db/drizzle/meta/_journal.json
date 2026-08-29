@@ -211,6 +211,48 @@
       "when": 1788739200000,
       "tag": "0029_workload_published_ports",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788825600000,
+      "tag": "0030_agent_command_delivery_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788912000000,
+      "tag": "0031_application_registry_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788998400000,
+      "tag": "0032_workload_upstreams_and_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789084800000,
+      "tag": "0033_domain_routing_migration_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789171200000,
+      "tag": "0034_workload_port_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789257600000,
+      "tag": "0035_workload_metrics_retention_index",
+      "breakpoints": true
     }
   ]
 }

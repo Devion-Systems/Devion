@@ -4,6 +4,7 @@ const configSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3010),
   DATABASE_URL: z.string().min(1),
   BUILDER_API_TOKEN: z.string().min(24),
+  BUILDER_SECRET_ENCRYPTION_KEY: z.string().min(24).optional(),
   BUILDKIT_ADDRESS: z.string().min(1).default("tcp://buildkit:1234"),
   BUILDER_WORKDIR: z.string().min(1).default("/tmp/devion-builder"),
   FIRECRACKER_AGENT_URL: z.string().url().optional(),
@@ -14,9 +15,15 @@ const configSchema = z.object({
   WORKER_LEASE_SECONDS: z.coerce.number().int().min(30).max(3_600).default(120),
 });
 
-export type Config = z.infer<typeof configSchema>;
+export type Config = Omit<z.infer<typeof configSchema>, "BUILDER_SECRET_ENCRYPTION_KEY"> & {
+  BUILDER_SECRET_ENCRYPTION_KEY: string;
+};
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
-  return configSchema.parse(env);
+  const parsed = configSchema.parse(env);
+  // Existing deployments may roll forward before the new variable is set. The
+  // API token remains a high-entropy fallback; new deployments should set a
+  // dedicated key so API-token rotation does not invalidate queued runs.
+  return { ...parsed, BUILDER_SECRET_ENCRYPTION_KEY: parsed.BUILDER_SECRET_ENCRYPTION_KEY ?? parsed.BUILDER_API_TOKEN };
 }
 
 const agentConfigSchema = z.object({

@@ -7,7 +7,7 @@ import type { RunRepository } from "./repository.ts";
 
 const config = loadConfig();
 await mkdir(config.BUILDER_WORKDIR, { recursive: true });
-const repository = new PostgresRunRepository(connect(config.DATABASE_URL));
+const repository = new PostgresRunRepository(connect(config.DATABASE_URL), config.BUILDER_SECRET_ENCRYPTION_KEY);
 await repository.migrate();
 const logBuffer = new LogBuffer(repository);
 const bufferedRepository = new Proxy(repository, {

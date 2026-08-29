@@ -39,6 +39,7 @@ export async function createBuilderRun(input: {
   buildArgs: Record<string, string>;
   image: string;
   insecureRegistry?: boolean;
+  secrets?: Record<string, string>;
 }) {
   const body = await request<{ data: BuilderRun }>("/v1/runs", {
     method: "POST",
@@ -46,7 +47,7 @@ export async function createBuilderRun(input: {
     body: JSON.stringify({
       source: { repository: input.repository, ref: input.ref },
       inputs: {},
-      secrets: {},
+      secrets: input.secrets ?? {},
       workflow: {
         version: 1,
         name: `Devion build ${input.buildId}`,

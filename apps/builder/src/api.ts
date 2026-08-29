@@ -3,7 +3,7 @@ import { loadConfig } from "./config.ts";
 import { connect, PostgresRunRepository } from "./postgres.ts";
 
 const config = loadConfig();
-const repository = new PostgresRunRepository(connect(config.DATABASE_URL));
+const repository = new PostgresRunRepository(connect(config.DATABASE_URL), config.BUILDER_SECRET_ENCRYPTION_KEY);
 await repository.migrate();
 const corsOrigins = config.CORS_ORIGINS.split(",").map((value) => value.trim()).filter(Boolean);
 const app = createApp(repository, config.BUILDER_API_TOKEN, corsOrigins);

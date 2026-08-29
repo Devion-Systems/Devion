@@ -21,6 +21,7 @@ const commandSchema = z.object({
     "volume.attach",
     "volume.detach",
     "runtime.inspect",
+    "workload.logs",
     "minecraft.command",
     "minecraft.logs",
     "minecraft.files.list",
@@ -47,6 +48,7 @@ const startPayload = z.object({
             containerPort: z.number().int().min(1).max(65_535),
             protocol: z.enum(["tcp", "udp"]).optional(),
             exposure: z.enum(["private", "public"]).optional(),
+            externalPort: z.number().int().min(1).max(65_535).optional(),
           }),
         )
         .optional(),
@@ -61,6 +63,7 @@ const startPayload = z.object({
         .optional(),
       restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).optional(),
       gracefulShutdownSeconds: z.number().int().min(1).max(600).optional(),
+      registryCredentialReference: z.string().uuid().optional(),
       command: z.string().min(1).max(2_000).optional(),
       workingDirectory: z.string().min(1).max(512).optional(),
       healthCheck: z.object({ command: z.string().min(1).max(2_000), intervalSeconds: z.number().int().min(1).max(3_600), timeoutSeconds: z.number().int().min(1).max(600), retries: z.number().int().min(1).max(20), startPeriodSeconds: z.number().int().min(0).max(3_600) }).optional(),
@@ -78,6 +81,17 @@ const minecraftFileReadPayload = z.object({ path: minecraftFilePath });
 const minecraftFileWritePayload = z.object({ path: minecraftFilePath, content: z.string().max(512 * 1024) });
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+/** Bounds every control-plane call so a hung connection cannot stall the agent forever. */
+async function apiFetch(input: URL | string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.DEVION_AGENT_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function loadIdentity() {
   try {
     return { identity: identitySchema.parse(JSON.parse(await readFile(identityPath, "utf8"))), enrolled: false };
@@ -85,13 +99,14 @@ async function loadIdentity() {
     const registrationToken = config.DEVION_AGENT_REGISTRATION_TOKEN;
     const localToken = config.DEVION_LOCAL_AGENT_TOKEN;
     if (!registrationToken && !localToken) return null;
-    const response = await fetch(new URL(registrationToken ? "/api/agents/register" : "/api/agents/local/register", config.DEVION_API_URL), {
+    const response = await apiFetch(new URL(registrationToken ? "/api/agents/register" : "/api/agents/local/register", config.DEVION_API_URL), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...(registrationToken ? { registrationToken } : { localToken }),
         name: config.DEVION_AGENT_NAME,
         hostname: config.DEVION_AGENT_HOSTNAME,
+        ...(config.DEVION_AGENT_ADVERTISED_ADDRESS ? { advertisedAddress: config.DEVION_AGENT_ADVERTISED_ADDRESS } : {}),
         architecture: config.DEVION_AGENT_ARCHITECTURE,
         os: config.DEVION_AGENT_OS,
         agentVersion: "0.1.0",
@@ -152,7 +167,7 @@ async function report(
   data?: unknown,
   error?: { code: string; message: string },
 ) {
-  await fetch(new URL("/api/agents/commands/results", config.DEVION_API_URL), {
+  await apiFetch(new URL("/api/agents/commands/results", config.DEVION_API_URL), {
     method: "POST",
     headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -165,7 +180,7 @@ async function report(
 }
 
 async function workloadSecrets(identity: z.infer<typeof identitySchema>, workloadId: string): Promise<Record<string, string>> {
-  const response = await fetch(new URL(`/api/agents/workloads/${workloadId}/secrets`, config.DEVION_API_URL), {
+  const response = await apiFetch(new URL(`/api/agents/workloads/${workloadId}/secrets`, config.DEVION_API_URL), {
     headers: { authorization: `Bearer ${identity.agentToken}` },
   });
   if (!response.ok) throw new Error(`Workload secret retrieval failed: ${response.status}`);
@@ -173,13 +188,71 @@ async function workloadSecrets(identity: z.infer<typeof identitySchema>, workloa
   return payload.environment;
 }
 
-async function reportWorkloadTelemetry(identity: z.infer<typeof identitySchema>): Promise<void> {
-  const response = await fetch(new URL("/api/agents/workloads", config.DEVION_API_URL), { headers: { authorization: `Bearer ${identity.agentToken}` } });
+async function workloadRegistryCredentials(identity: z.infer<typeof identitySchema>, workloadId: string): Promise<{ username: string; password: string } | undefined> {
+  const response = await apiFetch(new URL(`/api/agents/workloads/${workloadId}/registry-credentials`, config.DEVION_API_URL), { headers: { authorization: `Bearer ${identity.agentToken}` } });
+  if (!response.ok) throw new Error(`Registry credential retrieval failed: ${response.status}`);
+  const payload = z.object({ credentials: z.object({ username: z.string().min(1), password: z.string().min(1) }).nullable() }).parse(await response.json());
+  return payload.credentials ?? undefined;
+}
+
+const assignmentSchema = z.object({ workloadId: z.string().uuid(), cpuMilli: z.number().int().positive() });
+type Assignment = z.infer<typeof assignmentSchema>;
+const previousCpu = new Map<string, { timestamp: number; totalUsageNanos: number }>();
+let lastMetricsReportAt = 0;
+let lastPortReportAt = 0;
+let tickInFlight = false;
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await mapper(items[index]!);
+    }
+  }));
+  return results;
+}
+
+async function workloadAssignments(identity: z.infer<typeof identitySchema>): Promise<Assignment[]> {
+  const response = await apiFetch(new URL("/api/agents/workloads", config.DEVION_API_URL), { headers: { authorization: `Bearer ${identity.agentToken}` } });
   if (!response.ok) throw new Error(`Workload listing failed: ${response.status}`);
-  const assignments = z.array(z.object({ workloadId: z.string().uuid() })).parse(await response.json());
-  const reports = await Promise.all(assignments.map(async ({ workloadId }) => ({ workloadId, ...(await runtime.inspect(workloadId)) })));
-  const accepted = await fetch(new URL("/api/agents/workloads/telemetry", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ reports }) });
+  return z.array(assignmentSchema).parse(await response.json());
+}
+
+async function reportWorkloadTelemetry(identity: z.infer<typeof identitySchema>, assignments: Assignment[]): Promise<void> {
+  const includePorts = Date.now() - lastPortReportAt >= config.DEVION_AGENT_METRICS_INTERVAL_MS;
+  const reports = await mapWithConcurrency(assignments, 8, async ({ workloadId }) => {
+    const inspection = await runtime.inspect(workloadId);
+    return { workloadId, actualState: inspection.actualState, healthStatus: inspection.healthStatus, ...(includePorts ? { ports: inspection.ports } : {}) };
+  });
+  const accepted = await apiFetch(new URL("/api/agents/workloads/telemetry", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ reports }) });
   if (!accepted.ok) throw new Error(`Workload telemetry report failed: ${accepted.status}`);
+  if (includePorts) lastPortReportAt = Date.now();
+}
+
+async function reportWorkloadMetrics(identity: z.infer<typeof identitySchema>, assignments: Assignment[]): Promise<void> {
+  const now = Date.now();
+  if (now - lastMetricsReportAt < config.DEVION_AGENT_METRICS_INTERVAL_MS) return;
+  const samples = (await mapWithConcurrency(assignments, 8, async (assignment) => {
+    const stats = await runtime.metrics(assignment.workloadId);
+    if (!stats) return null;
+    const previous = previousCpu.get(assignment.workloadId);
+    previousCpu.set(assignment.workloadId, { timestamp: now, totalUsageNanos: stats.cpuTotalUsageNanos });
+    const elapsedNanos = previous ? (now - previous.timestamp) * 1_000_000 : 0;
+    const usedNanos = previous ? Math.max(0, stats.cpuTotalUsageNanos - previous.totalUsageNanos) : 0;
+    const cpuUsagePercent = previous && elapsedNanos > 0
+      ? Math.max(0, (usedNanos / elapsedNanos) / (assignment.cpuMilli / 1_000) * 100)
+      : null;
+    return { workloadId: assignment.workloadId, recordedAt: new Date(now).toISOString(), cpuUsagePercent, memoryUsageBytes: stats.memoryUsageBytes, memoryLimitBytes: stats.memoryLimitBytes, networkRxBytes: stats.networkRxBytes, networkTxBytes: stats.networkTxBytes, diskReadBytes: stats.diskReadBytes, diskWriteBytes: stats.diskWriteBytes };
+  })).filter((sample): sample is NonNullable<typeof sample> => sample !== null);
+  if (samples.length === 0) {
+    lastMetricsReportAt = Date.now();
+    return;
+  }
+  const accepted = await apiFetch(new URL("/api/agents/workloads/metrics", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ samples }) });
+  if (!accepted.ok) throw new Error(`Workload metrics report failed: ${accepted.status}`);
+  lastMetricsReportAt = Date.now();
 }
 
 async function execute(identity: z.infer<typeof identitySchema>, raw: unknown): Promise<void> {
@@ -188,19 +261,23 @@ async function execute(identity: z.infer<typeof identitySchema>, raw: unknown): 
     if (command.type === "workload.start") {
       const payload = startPayload.parse(command.payload);
       const secrets = await workloadSecrets(identity, payload.workloadId);
+      const registryCredentials = payload.runtimeConfig.registryCredentialReference ? await workloadRegistryCredentials(identity, payload.workloadId) : undefined;
+      const { registryCredentialReference: _, ...runtimeConfig } = payload.runtimeConfig;
       const started = await runtime.start({
         workloadId: payload.workloadId,
         image: payload.image,
         cpuMilli: payload.requirements.cpuMilli,
         memoryMib: payload.requirements.memoryMib,
-        ...payload.runtimeConfig,
-        environment: { ...payload.runtimeConfig.environment, ...secrets },
+        ...runtimeConfig,
+        ...(registryCredentials ? { registryCredentials } : {}),
+        environment: { ...runtimeConfig.environment, ...secrets },
       });
       await report(identity, command.commandId, "succeeded", started);
       return;
     }
     if (command.type === "workload.stop") {
-      await runtime.stop(command.resourceId);
+      const stop = z.object({ gracefulShutdownSeconds: z.number().int().min(1).max(600).optional() }).safeParse(command.payload);
+      await runtime.stop(command.resourceId, stop.success ? stop.data.gracefulShutdownSeconds : undefined);
       await report(identity, command.commandId, "succeeded");
       return;
     }
@@ -219,6 +296,11 @@ async function execute(identity: z.infer<typeof identitySchema>, raw: unknown): 
       const payload = minecraftLogsPayload.parse(command.payload);
       const logs = await runtime.logs(command.resourceId, payload.tail);
       await report(identity, command.commandId, "succeeded", { logs });
+      return;
+    }
+    if (command.type === "workload.logs") {
+      const payload = minecraftLogsPayload.parse(command.payload);
+      await report(identity, command.commandId, "succeeded", { logs: await runtime.logs(command.resourceId, payload.tail) });
       return;
     }
     if (command.type === "minecraft.files.list") {
@@ -249,18 +331,23 @@ async function execute(identity: z.infer<typeof identitySchema>, raw: unknown): 
 }
 
 async function tick(identity: z.infer<typeof identitySchema>): Promise<void> {
-  await fetch(new URL("/api/agents/heartbeat", config.DEVION_API_URL), {
+  await apiFetch(new URL("/api/agents/heartbeat", config.DEVION_API_URL), {
     method: "POST",
     headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" },
     body: JSON.stringify({ status: "ready", resources: await resources() }),
   });
-  const response = await fetch(new URL("/api/agents/commands", config.DEVION_API_URL), {
+  const response = await apiFetch(new URL("/api/agents/commands", config.DEVION_API_URL), {
     headers: { authorization: `Bearer ${identity.agentToken}` },
   });
   if (!response.ok) throw new Error(`Command poll failed: ${response.status}`);
   for (const command of z.array(z.unknown()).parse(await response.json()))
     await execute(identity, command);
-  await reportWorkloadTelemetry(identity);
+  const assignments = await workloadAssignments(identity);
+  await reportWorkloadTelemetry(identity, assignments);
+  // Stats are an independent, best-effort telemetry channel; a Docker stats
+  // failure must not interrupt heartbeat, command processing, or deployment.
+  try { await reportWorkloadMetrics(identity, assignments); }
+  catch (error) { console.error("Workload metrics report failed", error); }
 }
 
 const { identity, enrolled } = await resolveIdentity();
@@ -269,8 +356,13 @@ if (config.DEVION_AGENT_ENROLLMENT_ONLY && enrolled) {
   process.exit(0);
 }
 console.log(`Devion Agent ${identity.nodeId} connected from ${hostname()}`);
-await tick(identity);
-setInterval(
-  () => void tick(identity).catch((error) => console.error("Agent tick failed", error)),
-  config.DEVION_AGENT_POLL_INTERVAL_MS,
-);
+async function runTick(identity: z.infer<typeof identitySchema>): Promise<void> {
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try { await tick(identity); }
+  catch (error) { console.error("Agent tick failed", error); }
+  finally { tickInFlight = false; }
+}
+
+await runTick(identity);
+setInterval(() => void runTick(identity), config.DEVION_AGENT_POLL_INTERVAL_MS);
