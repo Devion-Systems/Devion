@@ -19,6 +19,10 @@ export function scheduleWorkload(
     if (requirements.region && node.region !== requirements.region) reasons.push("region-mismatch");
     if (requirements.requiredNodeId && node.id !== requirements.requiredNodeId)
       reasons.push("node-affinity-mismatch");
+    for (const port of requirements.requestedHostPorts ?? []) {
+      if (node.reservedHostPorts?.has(`${port.hostPort}/${port.protocol}`))
+        reasons.push(`host-port-unavailable:${port.hostPort}/${port.protocol}`);
+    }
     for (const [key, value] of Object.entries(requirements.requiredLabels ?? {})) {
       if (node.labels[key] !== value) reasons.push(`label-mismatch:${key}`);
     }

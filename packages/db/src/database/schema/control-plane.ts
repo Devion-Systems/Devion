@@ -227,6 +227,26 @@ export const workloadPorts = pgTable(
   ],
 );
 
+/** Durable node-local ownership of requested and dynamically assigned host ports. */
+export const nodePortReservations = pgTable(
+  "node_port_reservations",
+  {
+    id: text("id").primaryKey(),
+    nodeId: text("node_id").notNull().references(() => nodes.id, { onDelete: "cascade" }),
+    workloadId: text("workload_id").notNull().references(() => workloads.id, { onDelete: "cascade" }),
+    containerPort: integer("container_port").notNull(),
+    hostPort: integer("host_port").notNull(),
+    protocol: text("protocol", { enum: ["tcp", "udp"] }).notNull(),
+    status: text("status", { enum: ["reserved", "bound", "released"] }).notNull().default("reserved"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex("node_port_reservations_workload_port_uidx").on(table.workloadId, table.containerPort, table.protocol),
+    index("node_port_reservations_node_status_idx").on(table.nodeId, table.status),
+  ],
+);
+
 /**
  * Append-only measurements from the agent's local container runtime. Counters
  * remain raw; the API derives reset-aware rates for callers.

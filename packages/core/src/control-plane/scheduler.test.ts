@@ -46,6 +46,15 @@ test("scheduler honours persistent-volume node affinity", () => {
   expect(scheduleWorkload([node("other")], { ...requirements, requiredNodeId: "pinned" }).reasons).toContain("no-eligible-node");
 });
 
+test("scheduler rejects a node with a reserved fixed host port", () => {
+  const decision = scheduleWorkload(
+    [node("occupied", { reservedHostPorts: new Set(["25565/tcp"]) }), node("free")],
+    { ...requirements, requestedHostPorts: [{ hostPort: 25565, protocol: "tcp" }] },
+  );
+  expect(decision.nodeId).toBe("free");
+  expect(scheduleWorkload([node("occupied", { reservedHostPorts: new Set(["25565/tcp"]) })], { ...requirements, requestedHostPorts: [{ hostPort: 25565, protocol: "tcp" }] }).reasons).toContain("no-eligible-node");
+});
+
 test("scheduler provides a deterministic no-placement result", () => {
   expect(
     scheduleWorkload(

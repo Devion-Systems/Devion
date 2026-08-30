@@ -1069,14 +1069,14 @@ export default function ApplicationDetailPage() {
             <option value="public">Public</option>
           </select>
           <input
-            aria-label="Externer Port"
+            aria-label="Gewünschter Host-Port"
             type="number"
             min="1"
             max="65535"
             value={newExternalPort}
             onChange={(event) => setNewExternalPort(event.target.value)}
             disabled={newExposure !== "public"}
-            placeholder="Dynamisch"
+            placeholder="Automatisch (30000–39999)"
             className="h-10 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100 disabled:opacity-50"
           />
           <Button
@@ -1100,6 +1100,7 @@ export default function ApplicationDetailPage() {
             Port hinzufügen
           </Button>
         </div>
+        {newExposure === "public" && newExternalPort ? <p className="mt-2 text-xs text-amber-300">Ein fester Host-Port kann Scheduling einschränken und ist nur mit einer Replica erlaubt.</p> : null}
         {savePorts.error ? (
           <p role="alert" className="mt-3 text-sm text-red-300">
             {savePorts.error.message}

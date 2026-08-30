@@ -43,3 +43,24 @@ test("deletes only the named volume endpoint", async () => {
   await mockedRuntime(calls).removeVolume("devion-v-0123456789abcdef0123456789abcdef");
   expect(calls).toEqual([{ method: "DELETE", path: "/volumes/devion-v-0123456789abcdef0123456789abcdef", body: undefined }]);
 });
+
+test("publishes TCP and UDP with their separately assigned host ports", async () => {
+  const calls: DockerCall[] = [];
+  await mockedRuntime(calls).start({
+    workloadId: "01234567-89ab-cdef-0123-456789abcdef",
+    image: "example/game:latest",
+    cpuMilli: 250,
+    memoryMib: 256,
+    ports: [
+      { containerPort: 25565, protocol: "tcp", exposure: "public", externalPort: 32001 },
+      { containerPort: 25565, protocol: "udp", exposure: "public", externalPort: 32002 },
+      { containerPort: 9000, protocol: "tcp", exposure: "private" },
+    ],
+  });
+  const containerCreate = calls.find((call) => call.path.startsWith("/containers/create?"));
+  expect((containerCreate?.body as { HostConfig?: { PortBindings?: unknown } }).HostConfig?.PortBindings).toEqual({
+    "25565/tcp": [{ HostIp: "0.0.0.0", HostPort: "32001" }],
+    "25565/udp": [{ HostIp: "0.0.0.0", HostPort: "32002" }],
+  });
+  expect((containerCreate?.body as { ExposedPorts?: unknown }).ExposedPorts).toEqual({ "25565/tcp": {}, "25565/udp": {}, "9000/tcp": {} });
+});

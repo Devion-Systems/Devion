@@ -21,6 +21,7 @@ import {
   volumes,
   workloads,
 } from "@repo/db";
+import { hostPortPolicyError } from "@repo/core";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, like, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -131,7 +132,7 @@ const buildConfigurationInput = z.object({
 });
 const runtimeConfigurationInput = z.object({ runtime: z.literal("container").default("container"), command: z.string().trim().min(1).max(2_000).nullable().optional(), workingDirectory: z.string().trim().min(1).max(512).refine((value) => value.startsWith("/")).nullable().optional(), restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).default("unless-stopped"), gracefulShutdownSeconds: z.number().int().min(1).max(600).default(15), healthcheckCommand: z.string().trim().min(1).max(2_000).nullable().optional(), healthcheckIntervalSeconds: z.number().int().min(1).max(3_600).default(30), healthcheckTimeoutSeconds: z.number().int().min(1).max(600).default(5), healthcheckRetries: z.number().int().min(1).max(20).default(3), healthcheckStartPeriodSeconds: z.number().int().min(0).max(3_600).default(0), replicas: z.number().int().min(1).max(100).default(1) });
 const resourceConfigurationInput = z.object({ cpuMilli: z.number().int().min(1).max(256_000).default(250), memoryMib: z.number().int().min(16).max(1_048_576).default(256), storageMib: z.number().int().min(0).max(1_048_576).default(0) });
-const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); if (port.externalPort && port.exposure !== "public") ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: "An external port requires public exposure" }); seen.add(key); }); });
+const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); if (port.externalPort && port.exposure !== "public") ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: "An external port requires public exposure" }); const policy = port.externalPort ? hostPortPolicyError(port.externalPort) : null; if (policy) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: policy }); seen.add(key); }); });
 const mountPath = z.string().trim().min(1).max(512).refine(isSafeMountPath, "Mount path must be an absolute, normalized container path");
 const volumeMountInput = z.object({
   volumeId: z.string().uuid().optional(),
@@ -640,7 +641,7 @@ routes.put("/:orgSlug/projects/:projectId/applications/:applicationId/ports", as
   if (!scope.permissions.includes("applications.update")) return c.json({ error: "Permission required: applications.update" }, 403);
   const application = await applicationInScope(scope, c.req.param("applicationId")); if (!application) return c.json({ error: "Application not found" }, 404);
   const parsed = portsInput.safeParse(await c.req.json()); if (!parsed.success) return c.json({ error: "Invalid port configuration", issues: parsed.error.flatten() }, 400);
-  await db.transaction(async (tx) => { await tx.delete(applicationPorts).where(eq(applicationPorts.applicationId, application.id)); if (parsed.data.length) await tx.insert(applicationPorts).values(parsed.data.map((port) => ({ id: crypto.randomUUID(), applicationId: application.id, ...port }))); });
+  await db.transaction(async (tx) => { await tx.delete(applicationPorts).where(eq(applicationPorts.applicationId, application.id)); if (parsed.data.length) await tx.insert(applicationPorts).values(parsed.data.map((port) => ({ id: crypto.randomUUID(), applicationId: application.id, ...port, requestedHostPort: port.externalPort ?? null }))); });
   await recordAudit("application.ports_updated", application.id, scope.userId, c.req.raw, scope.project.id); return c.json(await db.select().from(applicationPorts).where(eq(applicationPorts.applicationId, application.id)));
 });
 

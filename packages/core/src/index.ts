@@ -7,6 +7,7 @@ export {
 } from "./firewall/rate-limit.js";
 export type { Brand, RequestId } from "./types/index.js";
 export { scheduleWorkload } from "./control-plane/scheduler.js";
+export { chooseDynamicHostPort, DYNAMIC_HOST_PORT_MAX, DYNAMIC_HOST_PORT_MIN, hostPortPolicyError, RESERVED_HOST_PORTS } from "./network/ports.js";
 export {
   type AgentCommand,
   type AgentCommandResult,

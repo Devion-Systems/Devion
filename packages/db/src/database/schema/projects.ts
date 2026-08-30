@@ -236,6 +236,7 @@ export const applicationPorts = pgTable(
     internalPort: integer("internal_port").notNull(),
     protocol: text("protocol", { enum: ["tcp", "udp"] }).default("tcp").notNull(),
     exposure: text("exposure", { enum: ["private", "public"] }).default("private").notNull(),
+    requestedHostPort: integer("requested_host_port"),
     externalPort: integer("external_port"),
     description: text("description"),
   },

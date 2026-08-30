@@ -39,6 +39,7 @@ export interface NodeSnapshot {
   labels: Record<string, string>;
   runtimes: RuntimeKind[];
   resources: NodeResources;
+  reservedHostPorts?: ReadonlySet<string>;
 }
 
 export interface WorkloadRequirements {
@@ -51,6 +52,7 @@ export interface WorkloadRequirements {
   requiredLabels?: Record<string, string>;
   /** Persistent local volumes are tied to the node that first created them. */
   requiredNodeId?: string;
+  requestedHostPorts?: Array<{ hostPort: number; protocol: "tcp" | "udp" }>;
 }
 
 export interface SchedulingDecision {

@@ -11,6 +11,7 @@ import {
   gameServers,
   member,
   nodeRegistrationTokens,
+  nodePortReservations,
   nodes,
   organization,
   projectEnvironments,
@@ -630,6 +631,7 @@ routes.post("/api/agents/commands/results", async (c) => {
     if (runtime.success && runtime.data.ports) {
       await replaceObservedWorkloadPorts(node.id, command.resourceId, runtime.data.ports);
     }
+    await db.update(nodePortReservations).set({ status: result.status === "succeeded" ? "bound" : "released" }).where(eq(nodePortReservations.workloadId, command.resourceId));
     void reconcileDomainRoutesForNode(node.id).catch((error) =>
       c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload start"),
     );
@@ -653,6 +655,7 @@ routes.post("/api/agents/commands/results", async (c) => {
     void reconcileDomainRoutesForNode(node.id).catch((error) =>
       c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload stop"),
     );
+    if (result.status === "succeeded") await db.update(nodePortReservations).set({ status: "released" }).where(eq(nodePortReservations.workloadId, command.resourceId));
   }
   return c.body(null, 204);
 });
