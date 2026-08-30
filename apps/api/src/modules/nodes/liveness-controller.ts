@@ -1,4 +1,4 @@
-import { agentCommands, db, deploymentEvents, deployments, nodes, workloads } from "@repo/db";
+import { agentCommands, db, deploymentEvents, deployments, nodes, volumes, workloads } from "@repo/db";
 import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -47,6 +47,10 @@ export function startNodeLivenessController(
         )
         .returning({ id: nodes.id });
       for (const node of stale) {
+        await db.update(volumes).set({ status: "unavailable" }).where(and(
+          eq(volumes.nodeId, node.id),
+          inArray(volumes.status, ["available", "in_use"]),
+        ));
         const assigned = await db
           .select()
           .from(workloads)

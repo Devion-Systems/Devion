@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { ContainerRuntime } from "./runtime/container-runtime.js";
+import { volumeMountsPayload } from "./runtime/volume-policy.js";
 
 const config = loadConfig();
 const identityPath = join(config.DEVION_AGENT_DATA_DIR, "identity.json");
@@ -52,15 +53,7 @@ const startPayload = z.object({
           }),
         )
         .optional(),
-      volumes: z
-        .array(
-          z.object({
-            name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),
-            target: z.string().startsWith("/"),
-            readOnly: z.boolean().optional(),
-          }),
-        )
-        .optional(),
+      volumes: volumeMountsPayload.optional(),
       restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).optional(),
       gracefulShutdownSeconds: z.number().int().min(1).max(600).optional(),
       registryCredentialReference: z.string().uuid().optional(),
@@ -79,6 +72,7 @@ const minecraftFilePath = z.string().min(1).max(240).refine(
 );
 const minecraftFileReadPayload = z.object({ path: minecraftFilePath });
 const minecraftFileWritePayload = z.object({ path: minecraftFilePath, content: z.string().max(512 * 1024) });
+const volumeDeletePayload = z.object({ runtimeName: z.string().regex(/^devion-v-[a-f0-9]{32}$/) });
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 /** Bounds every control-plane call so a hung connection cannot stall the agent forever. */
@@ -287,6 +281,12 @@ async function execute(identity: z.infer<typeof identitySchema>, raw: unknown): 
     }
     if (command.type === "workload.delete") {
       await runtime.remove(command.resourceId);
+      await report(identity, command.commandId, "succeeded");
+      return;
+    }
+    if (command.type === "volume.delete") {
+      const payload = volumeDeletePayload.parse(command.payload);
+      await runtime.removeVolume(payload.runtimeName);
       await report(identity, command.commandId, "succeeded");
       return;
     }

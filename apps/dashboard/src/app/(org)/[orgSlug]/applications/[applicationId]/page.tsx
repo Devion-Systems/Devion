@@ -128,6 +128,7 @@ export default function ApplicationDetailPage() {
   const [newExposure, setNewExposure] = useState("private");
   const [newExternalPort, setNewExternalPort] = useState("");
   const [newVolumeName, setNewVolumeName] = useState("");
+  const [newVolumeId, setNewVolumeId] = useState("");
   const [newMountPath, setNewMountPath] = useState("/data");
   const [newVolumeReadOnly, setNewVolumeReadOnly] = useState(false);
   const [defaultEnvironmentId, setDefaultEnvironmentId] = useState("");
@@ -173,6 +174,15 @@ export default function ApplicationDetailPage() {
       );
       if (!response.ok)
         throw new Error("Konfiguration konnte nicht geladen werden");
+      return response.json();
+    },
+  });
+  const projectVolumes = useQuery<Array<{ id: string; name: string; status: string; attachmentCount: number }>>({
+    enabled: Boolean(application),
+    queryKey: ["project", application?.projectId, "volumes"],
+    queryFn: async () => {
+      const response = await fetch(api(`/organizations/${orgSlug}/projects/${application!.projectId}/volumes`), { credentials: "include" });
+      if (!response.ok) throw new Error("Volumes konnten nicht geladen werden");
       return response.json();
     },
   });
@@ -437,7 +447,7 @@ export default function ApplicationDetailPage() {
               credentials: "include",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
-                volumeName: newVolumeName,
+                ...(newVolumeId ? { volumeId: newVolumeId } : { volumeName: newVolumeName }),
                 mountPath: newMountPath,
                 readOnly: newVolumeReadOnly,
               }),
@@ -452,9 +462,11 @@ export default function ApplicationDetailPage() {
     },
     onSuccess: () => {
       setNewVolumeName("");
+      setNewVolumeId("");
       void client.invalidateQueries({
         queryKey: ["application", applicationId, "configuration"],
       });
+      void client.invalidateQueries({ queryKey: ["project", application?.projectId, "volumes"] });
     },
   });
   const secretMutation = useMutation({
@@ -1309,11 +1321,16 @@ export default function ApplicationDetailPage() {
           ))}
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
+          <select aria-label="Bestehendes Volume" value={newVolumeId} onChange={(event) => setNewVolumeId(event.target.value)} className="h-10 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100">
+            <option value="">Neues Volume erstellen</option>
+            {(projectVolumes.data ?? []).filter((volume) => volume.status === "available" && volume.attachmentCount === 0).map((volume) => <option key={volume.id} value={volume.id}>{volume.name}</option>)}
+          </select>
           <input
             aria-label="Volume-Name"
             value={newVolumeName}
             onChange={(event) => setNewVolumeName(event.target.value)}
-            placeholder="app-data"
+            placeholder={newVolumeId ? "Bestehendes Volume ausgewählt" : "app-data"}
+            disabled={Boolean(newVolumeId)}
             className="h-10 rounded-xl border border-white/[0.1] bg-[#0b1217] px-3 text-zinc-100"
           />
           <input
@@ -1334,7 +1351,7 @@ export default function ApplicationDetailPage() {
           <Button
             onClick={() => volumeMutation.mutate({ action: "add" })}
             disabled={
-              !newVolumeName ||
+              (!newVolumeName && !newVolumeId) ||
               !newMountPath ||
               volumeMutation.isPending ||
               application.lifecycleStatus === "archived"

@@ -1,4 +1,4 @@
-import { applicationDeployments, applicationPorts, applications, auditLogs, builds, db, deployments, managedDatabases, member, organization, projectDomains, projectEnvironments, projectTeams, projects, team, user } from "@repo/db";
+import { applicationDeployments, applicationPorts, applications, auditLogs, builds, db, deployments, managedDatabases, member, organization, projectDomains, projectEnvironments, projectTeams, projects, team, user, volumes } from "@repo/db";
 import { and, asc, count, desc, eq, inArray, like, ne, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -414,14 +414,15 @@ projectRoutes.delete("/:orgSlug/projects/:projectId", async (c) => {
   if (!access) return c.json({ error: "Project not found or access denied" }, 404);
   const applicationItems = await db.select({ id: applications.id }).from(applications).where(eq(applications.projectId, access.project.id));
   const applicationIds = applicationItems.map((item) => item.id);
-  const [domainTotal, environmentTotal, buildTotal, deploymentTotal] = await Promise.all([
+  const [domainTotal, environmentTotal, buildTotal, deploymentTotal, volumeTotal] = await Promise.all([
     db.select({ total: count() }).from(projectDomains).where(eq(projectDomains.projectId, access.project.id)),
     db.select({ total: count() }).from(projectEnvironments).where(eq(projectEnvironments.projectId, access.project.id)),
     db.select({ total: count() }).from(builds).where(eq(builds.projectId, access.project.id)),
     applicationIds.length ? db.select({ total: count() }).from(deployments).where(inArray(deployments.applicationId, applicationIds)) : Promise.resolve([{ total: 0 }]),
+    db.select({ total: count() }).from(volumes).where(eq(volumes.projectId, access.project.id)),
   ]);
-  const dependencies = { applications: applicationIds.length, deployments: deploymentTotal[0]?.total ?? 0, builds: buildTotal[0]?.total ?? 0, domains: domainTotal[0]?.total ?? 0, environments: environmentTotal[0]?.total ?? 0 };
-  if (dependencies.applications || dependencies.deployments || dependencies.builds || dependencies.domains) return c.json({ error: "Project has dependent resources", dependencies }, 409);
+  const dependencies = { applications: applicationIds.length, deployments: deploymentTotal[0]?.total ?? 0, builds: buildTotal[0]?.total ?? 0, domains: domainTotal[0]?.total ?? 0, environments: environmentTotal[0]?.total ?? 0, volumes: volumeTotal[0]?.total ?? 0 };
+  if (dependencies.applications || dependencies.deployments || dependencies.builds || dependencies.domains || dependencies.volumes) return c.json({ error: "Project has dependent resources", dependencies }, 409);
   await db.transaction(async (tx) => {
     await tx.delete(projects).where(eq(projects.id, access.project.id));
     await tx.insert(auditLogs).values({ id: crypto.randomUUID(), actorId: access.userId, action: "project.deleted", targetType: "project", targetId: access.project.id, metadata: JSON.stringify({ dependencies }) });

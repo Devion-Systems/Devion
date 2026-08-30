@@ -1,6 +1,6 @@
 import { type NodeSnapshot, scheduleWorkload, type WorkloadRequirements } from "@repo/core";
-import { agentCommands, db, deploymentEvents, deployments, nodes, workloads } from "@repo/db";
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { agentCommands, db, deploymentEvents, deployments, nodes, volumes, workloads } from "@repo/db";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { refreshDeploymentStatus } from "./service.js";
@@ -20,6 +20,9 @@ const MAX_RECOVERY_ATTEMPTS = 5;
 const RECOVERY_BACKOFF_BASE_MS = 30_000;
 const RECOVERY_BACKOFF_MAX_MS = 10 * 60_000;
 const COMMAND_DEADLINE_MS = 2 * 60_000;
+const runtimeVolumesSchema = z.object({
+  volumes: z.array(z.object({ id: z.string().uuid().optional(), name: z.string().min(1) }).passthrough()).optional(),
+});
 
 /** Reconciles desired deployment state into durable agent commands; it never invokes a runtime itself. */
 export async function reconcileDeployment(deploymentId: string): Promise<void> {
@@ -64,7 +67,25 @@ async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
     return;
   }
 
-  const persistentVolumes = Boolean(z.object({ volumes: z.array(z.unknown()).optional() }).safeParse(deployment.runtimeConfig).data?.volumes?.length);
+  const runtimeVolumes = runtimeVolumesSchema.safeParse(deployment.runtimeConfig).data?.volumes ?? [];
+  const persistentVolumes = runtimeVolumes.length > 0;
+  const managedVolumeIds = runtimeVolumes.flatMap((volume) => volume.id ? [volume.id] : []);
+  if (managedVolumeIds.length > 0) {
+    const managed = await db.select().from(volumes).where(inArray(volumes.id, managedVolumeIds));
+    if (managed.length !== managedVolumeIds.length || managed.some((volume) => !["available", "in_use"].includes(volume.status))) {
+      await db.update(deployments).set({ status: "failed", failureReason: "Managed volume is unavailable" }).where(eq(deployments.id, deployment.id));
+      return;
+    }
+    const nodeIds = [...new Set(managed.flatMap((volume) => volume.nodeId ? [volume.nodeId] : []))];
+    if (nodeIds.length > 1) {
+      await db.update(deployments).set({ status: "failed", failureReason: "Local volumes are bound to different nodes" }).where(eq(deployments.id, deployment.id));
+      return;
+    }
+    if (nodeIds[0]) {
+      requirements = { ...requirements, requiredNodeId: nodeIds[0] };
+      await db.update(deployments).set({ requirements }).where(eq(deployments.id, deployment.id));
+    }
+  }
   const unhealthy = currentWorkloads.filter((workload) =>
     workload.desiredState === "running" &&
     (workload.actualState === "failed" || workload.healthFailureCount >= HEALTH_FAILURE_THRESHOLD),
@@ -105,6 +126,28 @@ async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
     if (!nodeId) {
       await refreshDeploymentStatus(deployment.id);
       return;
+    }
+    if (managedVolumeIds.length > 0) {
+      // Claim unbound local volumes atomically. If another reconcile won the
+      // claim, retry scheduling with that durable node affinity instead of
+      // creating a second same-named Docker volume on this node.
+      await db.update(volumes)
+        .set({ nodeId, status: "in_use" })
+        .where(and(inArray(volumes.id, managedVolumeIds), isNull(volumes.nodeId)));
+      const claimed = await db.select({ nodeId: volumes.nodeId }).from(volumes).where(inArray(volumes.id, managedVolumeIds));
+      const claimedNodeIds = [...new Set(claimed.flatMap((volume) => volume.nodeId ? [volume.nodeId] : []))];
+      if (claimedNodeIds.length !== 1) {
+        await db.update(deployments).set({ status: "failed", failureReason: "Local volume affinity conflict" }).where(eq(deployments.id, deployment.id));
+        return;
+      }
+      if (claimedNodeIds[0] !== nodeId) {
+        requirements = { ...requirements, requiredNodeId: claimedNodeIds[0] };
+        await db.update(deployments).set({ requirements }).where(eq(deployments.id, deployment.id));
+        index -= 1;
+        continue;
+      }
+      requirements = { ...requirements, requiredNodeId: nodeId };
+      await db.update(deployments).set({ requirements }).where(eq(deployments.id, deployment.id));
     }
     const workloadId = crypto.randomUUID();
     const commandId = crypto.randomUUID();

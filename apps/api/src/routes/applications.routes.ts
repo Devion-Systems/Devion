@@ -18,6 +18,7 @@ import {
   projectEnvironments,
   projects,
   user,
+  volumes,
   workloads,
 } from "@repo/db";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, like, or, type SQL } from "drizzle-orm";
@@ -36,6 +37,7 @@ import { listAccessibleProjects, resolveProjectAccess } from "../features/projec
 import { decryptEnvironmentValue, encryptEnvironmentValue } from "../features/environments/crypto.js";
 import { PostgresWorkloadMetricsProvider } from "../features/metrics/postgres-provider.js";
 import { aggregateWorkloadMetrics, metricBucketMs } from "../features/metrics/service.js";
+import { isSafeMountPath } from "../modules/volumes/policy.js";
 
 const routes = new Hono<AppEnv>();
 routes.use("/*", requireAuthenticatedUser);
@@ -130,7 +132,15 @@ const buildConfigurationInput = z.object({
 const runtimeConfigurationInput = z.object({ runtime: z.literal("container").default("container"), command: z.string().trim().min(1).max(2_000).nullable().optional(), workingDirectory: z.string().trim().min(1).max(512).refine((value) => value.startsWith("/")).nullable().optional(), restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).default("unless-stopped"), gracefulShutdownSeconds: z.number().int().min(1).max(600).default(15), healthcheckCommand: z.string().trim().min(1).max(2_000).nullable().optional(), healthcheckIntervalSeconds: z.number().int().min(1).max(3_600).default(30), healthcheckTimeoutSeconds: z.number().int().min(1).max(600).default(5), healthcheckRetries: z.number().int().min(1).max(20).default(3), healthcheckStartPeriodSeconds: z.number().int().min(0).max(3_600).default(0), replicas: z.number().int().min(1).max(100).default(1) });
 const resourceConfigurationInput = z.object({ cpuMilli: z.number().int().min(1).max(256_000).default(250), memoryMib: z.number().int().min(16).max(1_048_576).default(256), storageMib: z.number().int().min(0).max(1_048_576).default(0) });
 const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); if (port.externalPort && port.exposure !== "public") ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: "An external port requires public exposure" }); seen.add(key); }); });
-const volumeMountInput = z.object({ volumeName: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/), mountPath: z.string().startsWith("/").max(512), readOnly: z.boolean().default(false) });
+const mountPath = z.string().trim().min(1).max(512).refine(isSafeMountPath, "Mount path must be an absolute, normalized container path");
+const volumeMountInput = z.object({
+  volumeId: z.string().uuid().optional(),
+  // Compatibility shortcut: this creates a new project volume. It is never a
+  // Docker runtime name and therefore cannot select an existing foreign volume.
+  volumeName: z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/).optional(),
+  mountPath,
+  readOnly: z.boolean().default(false),
+}).refine((value) => Boolean(value.volumeId) !== Boolean(value.volumeName), "Provide either volumeId or volumeName");
 const secretAttachmentInput = z.object({ environmentId: z.string().uuid(), secretEnvironmentVariableId: z.string().uuid(), targetKey: z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/) });
 const applicationVariableInput = z.object({ environmentId: z.string().uuid().nullable().optional(), value: z.string().max(16_384) });
 
@@ -639,7 +649,20 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/volumes",
   if (!scope.permissions.includes("volumes.manage")) return c.json({ error: "Permission required: volumes.manage" }, 403);
   const application = await applicationInScope(scope, c.req.param("applicationId")); if (!application) return c.json({ error: "Application not found" }, 404);
   const parsed = volumeMountInput.safeParse(await c.req.json()); if (!parsed.success) return c.json({ error: "Invalid volume mount", issues: parsed.error.flatten() }, 400);
-  try { const [mount] = await db.insert(applicationVolumeMounts).values({ id: crypto.randomUUID(), applicationId: application.id, ...parsed.data }).returning(); await recordAudit("application.volume_attached", application.id, scope.userId, c.req.raw, scope.project.id); return c.json(mount, 201); }
+  try {
+    const volume = parsed.data.volumeId
+      ? await db.query.volumes.findFirst({ where: and(eq(volumes.id, parsed.data.volumeId), eq(volumes.projectId, scope.project.id)) })
+      : (await db.insert(volumes).values({ id: crypto.randomUUID(), projectId: scope.project.id, name: parsed.data.volumeName!, runtimeName: `devion-v-${crypto.randomUUID().replaceAll("-", "")}`, createdBy: scope.userId }).returning())[0];
+    if (!volume || volume.status !== "available") return c.json({ error: "Volume is not available for attachment" }, 409);
+    const [mount] = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(applicationVolumeMounts).values({ id: crypto.randomUUID(), applicationId: application.id, volumeId: volume.id, volumeName: volume.runtimeName, mountPath: parsed.data.mountPath, readOnly: parsed.data.readOnly }).returning();
+      await tx.update(volumes).set({ status: "in_use" }).where(eq(volumes.id, volume.id));
+      return [created];
+    });
+    await recordAudit("application.volume_attached", application.id, scope.userId, c.req.raw, scope.project.id);
+    await recordAudit("volume.attached", volume.id, scope.userId, c.req.raw, scope.project.id);
+    return c.json(mount, 201);
+  }
   catch (error) { if ((error as { code?: string }).code === "23505") return c.json({ error: "A volume is already mounted at this path" }, 409); throw error; }
 });
 
@@ -647,8 +670,15 @@ routes.delete("/:orgSlug/projects/:projectId/applications/:applicationId/volumes
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId")); if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
   if (!scope.permissions.includes("volumes.manage")) return c.json({ error: "Permission required: volumes.manage" }, 403);
   const application = await applicationInScope(scope, c.req.param("applicationId")); if (!application) return c.json({ error: "Application not found" }, 404);
-  const [removed] = await db.delete(applicationVolumeMounts).where(and(eq(applicationVolumeMounts.id, c.req.param("mountId")), eq(applicationVolumeMounts.applicationId, application.id))).returning({ id: applicationVolumeMounts.id });
-  if (!removed) return c.json({ error: "Volume mount not found" }, 404); await recordAudit("application.volume_detached", application.id, scope.userId, c.req.raw, scope.project.id); return c.body(null, 204);
+  const [removed] = await db.delete(applicationVolumeMounts).where(and(eq(applicationVolumeMounts.id, c.req.param("mountId")), eq(applicationVolumeMounts.applicationId, application.id))).returning({ id: applicationVolumeMounts.id, volumeId: applicationVolumeMounts.volumeId });
+  if (!removed) return c.json({ error: "Volume mount not found" }, 404);
+  if (removed.volumeId) {
+    const remaining = await db.select({ id: applicationVolumeMounts.id }).from(applicationVolumeMounts).where(eq(applicationVolumeMounts.volumeId, removed.volumeId)).limit(1);
+    if (remaining.length === 0) await db.update(volumes).set({ status: "in_use" }).where(eq(volumes.id, removed.volumeId));
+    await recordAudit("volume.detached", removed.volumeId, scope.userId, c.req.raw, scope.project.id);
+  }
+  await recordAudit("application.volume_detached", application.id, scope.userId, c.req.raw, scope.project.id);
+  return c.body(null, 204);
 });
 
 routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/secrets", async (c) => {
@@ -830,7 +860,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
   const runtimeConfig = {
     environment,
     ports: ports.map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure, ...(port.externalPort ? { externalPort: port.externalPort } : {}) })),
-    volumes: configuredVolumes.map((volume) => ({ name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })),
+    volumes: configuredVolumes.map((volume) => ({ ...(volume.volumeId ? { id: volume.volumeId } : {}), name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })),
     restartPolicy: runtimeDefaults?.restartPolicy ?? "unless-stopped",
     gracefulShutdownSeconds: runtimeDefaults?.gracefulShutdownSeconds ?? 15,
     ...(application.registryCredentialReference ? { registryCredentialReference: application.registryCredentialReference } : {}),

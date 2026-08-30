@@ -21,6 +21,7 @@ import { startMetricsRetentionController, stopMetricsRetentionController } from 
 import { startDomainRouteController, stopDomainRouteController } from "./features/routing/controller.js";
 import { startNodeLivenessController, stopNodeLivenessController } from "./modules/nodes/liveness-controller.js";
 import { startCommandTimeoutController, stopCommandTimeoutController } from "./modules/commands/controller.js";
+import { startVolumeController, stopVolumeController } from "./modules/volumes/controller.js";
 import {
   corsMiddleware,
   globalErrorHandler,
@@ -92,6 +93,7 @@ const startServer = async () => {
   startDomainRouteController(logger);
   startNodeLivenessController(logger);
   startCommandTimeoutController(logger);
+  startVolumeController(logger);
 };
 
 startServer();
@@ -105,6 +107,7 @@ const shutdown = async () => {
   stopDomainRouteController();
   stopNodeLivenessController();
   stopCommandTimeoutController();
+  stopVolumeController();
   await closeDbPool();
   logger.info("Database pool closed");
   process.exit(0);

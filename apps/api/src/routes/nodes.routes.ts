@@ -14,6 +14,7 @@ import {
   nodes,
   organization,
   projectEnvironments,
+  volumes,
   workloadPorts,
   workloads,
 } from "@repo/db";
@@ -361,6 +362,12 @@ routes.post("/api/agents/heartbeat", async (c) => {
       updatedAt: new Date(),
     })
     .where(eq(nodes.id, node.id));
+  if (parsed.data.status === "ready") {
+    await db.update(volumes).set({ status: "in_use" }).where(and(
+      eq(volumes.nodeId, node.id),
+      eq(volumes.status, "unavailable"),
+    ));
+  }
   if (node.status !== parsed.data.status) {
     void reconcileDomainRoutesForNode(node.id).catch((error) =>
       c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after node status change"),

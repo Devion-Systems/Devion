@@ -1,6 +1,7 @@
-import { applications, deploymentEvents, deployments, db, workloads } from "@repo/db";
+import { applications, deploymentEvents, deploymentVolumeMounts, deployments, db, workloads } from "@repo/db";
 import { and, desc, eq } from "drizzle-orm";
 import { deriveDeploymentStatus, type DeploymentStatus } from "./lifecycle.js";
+import { managedVolumeMounts } from "../volumes/snapshot.js";
 
 export { deriveDeploymentStatus, type DeploymentStatus } from "./lifecycle.js";
 
@@ -63,6 +64,10 @@ export async function createDeployment(input: DeploymentCreateInput): Promise<ty
           status: input.desiredState === "running" ? "queued" : "stopped",
         }).returning();
         if (!created) throw new Error("Deployment could not be persisted");
+        const managedMounts = managedVolumeMounts(input.runtimeConfig);
+        if (managedMounts.length) await tx.insert(deploymentVolumeMounts).values(
+          managedMounts.map((mount) => ({ id: crypto.randomUUID(), deploymentId: id, ...mount })),
+        );
         await tx.insert(deploymentEvents).values({
           id: crypto.randomUUID(), deploymentId: id,
           type: input.rollbackFromDeploymentId ? "deployment.rollback_created" : "deployment.created",
@@ -76,6 +81,7 @@ export async function createDeployment(input: DeploymentCreateInput): Promise<ty
   }
   throw new Error("Deployment revision could not be reserved");
 }
+
 
 export async function createRollbackDeployment(sourceDeploymentId: string, actorId: string): Promise<typeof deployments.$inferSelect> {
   const source = await db.query.deployments.findFirst({ where: eq(deployments.id, sourceDeploymentId) });

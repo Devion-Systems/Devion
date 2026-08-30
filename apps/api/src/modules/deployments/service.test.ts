@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { deriveDeploymentStatus } from "./lifecycle.js";
+import { managedVolumeMounts } from "../volumes/snapshot.js";
 
 test("derives running only when every desired replica is running and healthy", () => {
   expect(deriveDeploymentStatus("running", 2, [
@@ -26,4 +27,12 @@ test("marks a deployment degraded when a workload is lost with its node", () => 
 test("reports stop progress separately from a settled stopped deployment", () => {
   expect(deriveDeploymentStatus("stopped", 1, [{ desiredState: "stopped", actualState: "running", healthStatus: "none", healthMessage: null }]).status).toBe("stopping");
   expect(deriveDeploymentStatus("stopped", 1, [{ desiredState: "stopped", actualState: "stopped", healthStatus: "none", healthMessage: null }]).status).toBe("stopped");
+});
+
+test("captures only valid managed volume references in a deployment snapshot", () => {
+  expect(managedVolumeMounts({ volumes: [
+    { id: "46ac6dc2-6c87-4f79-bbd2-7ca7053ece4d", name: "devion-v-0123456789abcdef0123456789abcdef", target: "/data", readOnly: false },
+    { id: "not-a-volume-id", name: "other", target: "/ignored" },
+    { name: "legacy-volume", target: "/legacy" },
+  ] })).toEqual([{ volumeId: "46ac6dc2-6c87-4f79-bbd2-7ca7053ece4d", mountPath: "/data", readOnly: false }]);
 });

@@ -4,6 +4,7 @@ import {
   agentCommands,
   db,
   deployments,
+  deploymentVolumeMounts,
   deploymentEvents,
   gameServerAccess,
   gameServers,
@@ -12,6 +13,7 @@ import {
   team,
   teamMember,
   user,
+  volumes,
   workloads,
 } from "@repo/db";
 import { and, asc, desc, eq, or } from "drizzle-orm";
@@ -173,7 +175,9 @@ routes.post("/:orgSlug/game-servers", async (c) => {
   const serverId = crypto.randomUUID();
   const applicationId = crypto.randomUUID();
   const deploymentId = crypto.randomUUID();
+  const volumeId = crypto.randomUUID();
   const containerName = `devion-game-${serverId.replaceAll("-", "")}`;
+  const runtimeVolumeName = `devion-v-${volumeId.replaceAll("-", "")}`;
   const image = minecraftRuntimeImage;
   const { projectId: _projectId, ...game } = parsed.data;
   await db.transaction(async (tx) => {
@@ -199,6 +203,14 @@ routes.post("/:orgSlug/game-servers", async (c) => {
       containerName,
       status: "provisioning",
       ...game,
+    });
+    await tx.insert(volumes).values({
+      id: volumeId,
+      projectId: project.id,
+      name: `game-${serverId.slice(0, 8)}-data`,
+      runtimeName: runtimeVolumeName,
+      status: "in_use",
+      createdBy: access.userId,
     });
     await tx.insert(gameServerAccess).values({
       id: crypto.randomUUID(),
@@ -231,17 +243,20 @@ routes.post("/:orgSlug/game-servers", async (c) => {
           RCON_PASSWORD: randomBytes(24).toString("base64url"),
         },
         ports: [{ containerPort: 25565 }],
-        volumes: [{ name: `${containerName}-data`, target: "/data" }],
+        volumes: [{ id: volumeId, name: runtimeVolumeName, target: "/data" }],
       },
       configurationSnapshot: {
         source: { type: "image", image },
         runtime: "container",
         resources: { cpuMilli: 1_000, memoryMib: parsed.data.memoryMib, storageMib: 0 },
         ports: [{ containerPort: 25565 }],
-        volumes: [{ name: `${containerName}-data`, target: "/data" }],
+        volumes: [{ id: volumeId, name: runtimeVolumeName, target: "/data" }],
         environmentKeys: ["EULA", "VERSION", "MOTD", "MEMORY", "ENABLE_RCON", "RCON_PASSWORD"],
       },
       status: "queued",
+    });
+    await tx.insert(deploymentVolumeMounts).values({
+      id: crypto.randomUUID(), deploymentId, volumeId, mountPath: "/data", readOnly: false,
     });
     await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId, type: "deployment.created", message: "Game server deployment revision v1 created" });
   });

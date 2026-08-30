@@ -7,7 +7,7 @@ export interface ContainerStartSpec {
   memoryMib: number;
   environment?: Record<string, string>;
   ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp"; exposure?: "private" | "public"; externalPort?: number }>;
-  volumes?: Array<{ name: string; target: string; readOnly?: boolean }>;
+  volumes?: Array<{ id?: string; name: string; target: string; readOnly?: boolean }>;
   restartPolicy?: "no" | "on-failure" | "always" | "unless-stopped";
   gracefulShutdownSeconds?: number;
   command?: string;
@@ -49,7 +49,11 @@ export class ContainerRuntime {
     for (const volume of spec.volumes ?? []) {
       await this.request("POST", "/volumes/create", {
         Name: volume.name,
-        Labels: { "devion.managed": "true", "devion.workload-id": spec.workloadId },
+        Labels: {
+          "devion.managed": "true",
+          "devion.workload-id": spec.workloadId,
+          ...(volume.id ? { "devion.volume-id": volume.id } : {}),
+        },
       });
     }
     await this.request("POST", `/containers/create?name=${encodeURIComponent(name)}`, {
@@ -144,6 +148,16 @@ export class ContainerRuntime {
 
   async remove(workloadId: string): Promise<void> {
     await this.removeIfPresent(this.name(workloadId));
+  }
+
+  /** Deletes a managed named volume only after the control plane detached it. */
+  async removeVolume(name: string): Promise<void> {
+    try {
+      await this.request("DELETE", `/volumes/${encodeURIComponent(name)}`);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Docker API 404:")) return;
+      throw error;
+    }
   }
 
   /** Executes only the Minecraft RCON client, never an arbitrary shell command. */

@@ -21,6 +21,7 @@ import { setupRoutes } from "./setup.routes.js";
 import { systemUpdateRoutes } from "./system-updates.routes.js";
 import { teamRoutes } from "./teams.routes.js";
 import { vmRoutes } from "./vms.routes.js";
+import { volumeRoutes } from "./volumes.routes.js";
 
 /**
  * Central route composition.
@@ -67,5 +68,6 @@ routes.route("/organizations", gameServerRoutes);
 routes.route("/organizations", managedDatabaseRoutes);
 routes.route("/organizations", teamRoutes);
 routes.route("/organizations", organizationRbacRoutes);
+routes.route("/organizations", volumeRoutes);
 
 export { routes };
