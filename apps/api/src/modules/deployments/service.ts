@@ -1,4 +1,4 @@
-import { deploymentEvents, deployments, db, workloads } from "@repo/db";
+import { applications, deploymentEvents, deployments, db, workloads } from "@repo/db";
 import { and, desc, eq } from "drizzle-orm";
 import { deriveDeploymentStatus, type DeploymentStatus } from "./lifecycle.js";
 
@@ -142,5 +142,25 @@ export async function refreshDeploymentStatus(deploymentId: string): Promise<Dep
       reason: next.failureReason,
     });
   });
+  await refreshApplicationStatus(deployment.applicationId);
   return next.status;
+}
+
+/** Application.status is a derived cache of the latest desired deployment, never an agent-owned health fact. */
+async function refreshApplicationStatus(applicationId: string): Promise<void> {
+  const current = await db.query.deployments.findFirst({
+    where: eq(deployments.applicationId, applicationId),
+    orderBy: [desc(deployments.createdAt)],
+    columns: { status: true, desiredState: true },
+  });
+  const status = !current || current.desiredState !== "running"
+    ? "stopped"
+    : current.status === "running"
+      ? "healthy"
+      : current.status === "degraded"
+        ? "degraded"
+        : current.status === "failed"
+          ? "failed"
+          : "deploying";
+  await db.update(applications).set({ status }).where(eq(applications.id, applicationId));
 }

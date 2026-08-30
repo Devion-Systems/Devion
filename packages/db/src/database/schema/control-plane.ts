@@ -76,6 +76,8 @@ export const nodes = pgTable(
     schedulingEnabled: integer("scheduling_enabled").notNull().default(1),
     agentTokenHash: text("agent_token_hash").notNull().unique(),
     lastHeartbeatAt: timestamp("last_heartbeat_at"),
+    unhealthyAt: timestamp("unhealthy_at"),
+    offlineAt: timestamp("offline_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -124,6 +126,11 @@ export const deployments = pgTable(
     configurationSnapshot: jsonb("configuration_snapshot"),
     status: text("status", { enum: ["queued", "scheduling", "starting", "running", "degraded", "failed", "stopping", "stopped", "superseded"] }).notNull().default("queued"),
     failureReason: text("failure_reason"),
+    recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    recoveryNextAttemptAt: timestamp("recovery_next_attempt_at"),
+    recoveryState: text("recovery_state", { enum: ["idle", "backoff", "manual_intervention"] }).notNull().default("idle"),
+    reconcileLeaseId: text("reconcile_lease_id"),
+    reconcileLeaseUntil: timestamp("reconcile_lease_until"),
     rollbackFromDeploymentId: text("rollback_from_deployment_id").references((): AnyPgColumn => deployments.id, { onDelete: "restrict" }),
     buildId: text("build_id").references(() => builds.id, { onDelete: "restrict" }),
     commitSha: text("commit_sha"),
@@ -156,14 +163,23 @@ export const workloads = pgTable(
     schedulingReasons: jsonb("scheduling_reasons").$type<string[]>().notNull().default([]),
     desiredState: text("desired_state", { enum: ["running", "stopped", "deleted"] }).notNull(),
     actualState: text("actual_state", {
-      enum: ["pending", "starting", "running", "stopped", "failed", "unknown"],
+      enum: ["pending", "starting", "running", "stopped", "failed", "lost", "unknown"],
     })
       .notNull()
       .default("pending"),
-    healthStatus: text("health_status", { enum: ["none", "starting", "healthy", "unhealthy"] })
+    healthStatus: text("health_status", { enum: ["none", "starting", "healthy", "unhealthy", "unknown"] })
       .notNull()
       .default("none"),
     healthMessage: text("health_message"),
+    healthFailureCount: integer("health_failure_count").notNull().default(0),
+    healthCheckedAt: timestamp("health_checked_at"),
+    lastHealthyAt: timestamp("last_healthy_at"),
+    healthChangedAt: timestamp("health_changed_at"),
+    /** Monotonically increasing server-side sequence for accepting agent reports. */
+    reportGeneration: integer("report_generation").notNull().default(1),
+    lostAt: timestamp("lost_at"),
+    replacementOfWorkloadId: text("replacement_of_workload_id").references((): AnyPgColumn => workloads.id, { onDelete: "set null" }),
+    replacementReason: text("replacement_reason"),
     restartCount: integer("restart_count").notNull().default(0),
     lastReportedAt: timestamp("last_reported_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

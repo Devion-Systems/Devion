@@ -356,6 +356,8 @@ routes.post("/api/agents/heartbeat", async (c) => {
       status: parsed.data.status,
       resources: parsed.data.resources,
       lastHeartbeatAt: new Date(),
+      ...(parsed.data.status === "ready" ? { unhealthyAt: null, offlineAt: null } : {}),
+      ...(parsed.data.status === "unhealthy" ? { unhealthyAt: new Date(), offlineAt: null } : {}),
       updatedAt: new Date(),
     })
     .where(eq(nodes.id, node.id));
@@ -429,7 +431,7 @@ routes.get("/api/agents/commands", async (c) => {
   );
 });
 const reportedPortsInput = z.record(z.number().int().min(1).max(65_535));
-const workloadTelemetryInput = z.object({ reports: z.array(z.object({ workloadId: z.string().uuid(), actualState: z.enum(["running", "stopped", "failed", "unknown"]), healthStatus: z.enum(["none", "starting", "healthy", "unhealthy"]), ports: reportedPortsInput.optional() })).max(500) });
+const workloadTelemetryInput = z.object({ reports: z.array(z.object({ workloadId: z.string().uuid(), reportGeneration: z.number().int().positive(), actualState: z.enum(["running", "stopped", "failed", "unknown"]), healthStatus: z.enum(["none", "starting", "healthy", "unhealthy"]), healthMessage: z.string().trim().min(1).max(1_000).optional(), observedAt: z.string().datetime(), ports: reportedPortsInput.optional() })).min(1).max(500) });
 const metricNumber = z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER);
 const workloadMetricsInput = z.object({ samples: z.array(z.object({ workloadId: z.string().uuid(), recordedAt: z.string().datetime(), cpuUsagePercent: z.number().finite().min(0).max(10_000).nullable(), memoryUsageBytes: metricNumber, memoryLimitBytes: metricNumber.nullable(), networkRxBytes: metricNumber, networkTxBytes: metricNumber, diskReadBytes: metricNumber, diskWriteBytes: metricNumber })).min(1).max(500) });
 
@@ -500,7 +502,7 @@ routes.get("/api/agents/workloads/:workloadId/registry-credentials", async (c) =
 routes.get("/api/agents/workloads", async (c) => {
   const node = await agentIdentity(c.req.raw);
   if (!node) return c.json({ error: "Agent authentication required" }, 401);
-  return c.json(await db.select({ workloadId: workloads.id, cpuMilli: sql<number>`(${deployments.requirements}->>'cpuMilli')::integer` }).from(workloads).innerJoin(deployments, eq(workloads.deploymentId, deployments.id)).where(and(eq(workloads.nodeId, node.id), eq(workloads.desiredState, "running"))));
+  return c.json(await db.select({ workloadId: workloads.id, cpuMilli: sql<number>`(${deployments.requirements}->>'cpuMilli')::integer`, reportGeneration: workloads.reportGeneration }).from(workloads).innerJoin(deployments, eq(workloads.deploymentId, deployments.id)).where(and(eq(workloads.nodeId, node.id), eq(workloads.desiredState, "running"))));
 });
 
 routes.post("/api/agents/workloads/telemetry", async (c) => {
@@ -508,21 +510,33 @@ routes.post("/api/agents/workloads/telemetry", async (c) => {
   if (!node) return c.json({ error: "Agent authentication required" }, 401);
   const parsed = workloadTelemetryInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid workload telemetry", issues: parsed.error.flatten() }, 400);
-  await Promise.all(parsed.data.reports.map(async (report) => {
-    await db.update(workloads).set({ actualState: report.actualState, healthStatus: report.healthStatus, healthMessage: null, ...(report.ports === undefined ? {} : { publishedPorts: report.ports }), lastReportedAt: new Date() }).where(and(eq(workloads.id, report.workloadId), eq(workloads.nodeId, node.id)));
+  const now = new Date();
+  const reports = parsed.data.reports.map((report) => ({ ...report, observedAt: new Date(report.observedAt) }));
+  if (reports.some((report) => report.observedAt.getTime() < now.getTime() - 5 * 60_000 || report.observedAt.getTime() > now.getTime() + 60_000)) return c.json({ error: "Health timestamp is outside the accepted window" }, 400);
+  const reportIds = [...new Set(reports.map((report) => report.workloadId))];
+  if (reportIds.length !== reports.length) return c.json({ error: "A telemetry batch may contain each workload only once" }, 400);
+  const owned = await db.select({ id: workloads.id, reportGeneration: workloads.reportGeneration, healthStatus: workloads.healthStatus, healthCheckedAt: workloads.healthCheckedAt }).from(workloads).where(and(inArray(workloads.id, reportIds), eq(workloads.nodeId, node.id)));
+  if (owned.length !== reportIds.length) return c.json({ error: "Telemetry batch contains a workload not assigned to this node" }, 403);
+  const generations = new Map(owned.map((workload) => [workload.id, workload.reportGeneration]));
+  if (reports.some((report) => generations.get(report.workloadId) !== report.reportGeneration)) return c.json({ error: "Telemetry report generation is stale" }, 409);
+  const previous = new Map(owned.map((workload) => [workload.id, workload]));
+  if (reports.some((report) => (previous.get(report.workloadId)?.healthCheckedAt?.getTime() ?? Number.NEGATIVE_INFINITY) >= report.observedAt.getTime())) return c.json({ error: "Telemetry report is older than the current workload state" }, 409);
+  await Promise.all(reports.map(async (report) => {
+    const prior = previous.get(report.workloadId);
+    await db.update(workloads).set({ actualState: report.actualState, healthStatus: report.healthStatus, healthMessage: report.healthMessage ?? null, healthFailureCount: report.healthStatus === "unhealthy" ? sql`${workloads.healthFailureCount} + 1` : 0, healthCheckedAt: report.observedAt, ...(report.healthStatus === "healthy" ? { lastHealthyAt: report.observedAt } : {}), ...(prior?.healthStatus !== report.healthStatus ? { healthChangedAt: now } : {}), ...(report.ports === undefined ? {} : { publishedPorts: report.ports }), lastReportedAt: now }).where(and(eq(workloads.id, report.workloadId), eq(workloads.nodeId, node.id), eq(workloads.reportGeneration, report.reportGeneration), or(isNull(workloads.healthCheckedAt), lt(workloads.healthCheckedAt, report.observedAt))));
     if (report.ports !== undefined) await replaceObservedWorkloadPorts(node.id, report.workloadId, report.ports);
   }));
-  const reportedIds = parsed.data.reports.map((report) => report.workloadId);
+  const reportedIds = reports.map((report) => report.workloadId);
   const reportedWorkloads = reportedIds.length
     ? await db.select({ deploymentId: workloads.deploymentId }).from(workloads).where(and(inArray(workloads.id, reportedIds), eq(workloads.nodeId, node.id)))
     : [];
   await Promise.all([...new Set(reportedWorkloads.map((workload) => workload.deploymentId))].map((deploymentId) => refreshDeploymentStatus(deploymentId)));
-  if (parsed.data.reports.some((report) => report.ports !== undefined)) {
+  if (reports.some((report) => report.ports !== undefined)) {
     void reconcileDomainRoutesForNode(node.id).catch((error) =>
       c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload port report"),
     );
   }
-  return c.json({ accepted: parsed.data.reports.length });
+  return c.json({ accepted: reports.length });
 });
 
 /** Agent-only batch ingestion. The node is derived from the bearer token, not client input. */
@@ -591,10 +605,6 @@ routes.post("/api/agents/commands/results", async (c) => {
         where: eq(deployments.id, workload.deploymentId),
       });
       if (deployment) {
-        await db
-          .update(applications)
-          .set({ status: result.status === "succeeded" ? "healthy" : "failed" })
-          .where(eq(applications.id, deployment.applicationId));
         if (result.status === "succeeded") {
           const port = runtime.success ? runtime.data.ports?.["25565/tcp"] : undefined;
           await db

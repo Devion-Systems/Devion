@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 export type ResourceStatus =
   | "healthy" | "ready" | "deploying" | "starting" | "degraded"
-  | "failed" | "failing" | "stopped" | "idle" | "unknown"
+  | "failed" | "failing" | "lost" | "stopped" | "idle" | "unknown"
   | "queued" | "running" | "pushing" | "succeeded" | "cancelled" | "active" | "archived" | "stopping" | "superseded" | "scheduling";
 
 const config: Record<ResourceStatus, { label: string; className: string; icon: typeof CheckCircle2 }> = {
@@ -21,6 +21,7 @@ const config: Record<ResourceStatus, { label: string; className: string; icon: t
   degraded: { label: "Beeinträchtigt", className: "border-amber-400/20 bg-amber-400/10 text-amber-300", icon: OctagonAlert },
   failed: { label: "Fehlgeschlagen", className: "border-red-400/20 bg-red-400/10 text-red-300", icon: XCircle },
   failing: { label: "Fehler", className: "border-red-400/20 bg-red-400/10 text-red-300", icon: XCircle },
+  lost: { label: "Verloren", className: "border-red-400/20 bg-red-400/10 text-red-300", icon: OctagonAlert },
   stopped: { label: "Gestoppt", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
   idle: { label: "Inaktiv", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: PauseCircle },
   unknown: { label: "Unbekannt", className: "border-zinc-400/20 bg-zinc-400/10 text-zinc-300", icon: CircleHelp },

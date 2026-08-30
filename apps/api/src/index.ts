@@ -20,6 +20,7 @@ import { startBuildController, stopBuildController } from "./modules/builds/cont
 import { startMetricsRetentionController, stopMetricsRetentionController } from "./features/metrics/controller.js";
 import { startDomainRouteController, stopDomainRouteController } from "./features/routing/controller.js";
 import { startNodeLivenessController, stopNodeLivenessController } from "./modules/nodes/liveness-controller.js";
+import { startCommandTimeoutController, stopCommandTimeoutController } from "./modules/commands/controller.js";
 import {
   corsMiddleware,
   globalErrorHandler,
@@ -90,6 +91,7 @@ const startServer = async () => {
   startMetricsRetentionController(logger);
   startDomainRouteController(logger);
   startNodeLivenessController(logger);
+  startCommandTimeoutController(logger);
 };
 
 startServer();
@@ -102,6 +104,7 @@ const shutdown = async () => {
   stopMetricsRetentionController();
   stopDomainRouteController();
   stopNodeLivenessController();
+  stopCommandTimeoutController();
   await closeDbPool();
   logger.info("Database pool closed");
   process.exit(0);

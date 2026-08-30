@@ -17,6 +17,12 @@ test("preserves failed and degraded distinction from workload facts", () => {
   ])).toEqual({ status: "degraded", failureReason: "A workload failed" });
 });
 
+test("marks a deployment degraded when a workload is lost with its node", () => {
+  expect(deriveDeploymentStatus("running", 1, [
+    { desiredState: "running", actualState: "lost", healthStatus: "unknown", healthMessage: "Node heartbeat timed out" },
+  ])).toEqual({ status: "degraded", failureReason: "Node heartbeat timed out" });
+});
+
 test("reports stop progress separately from a settled stopped deployment", () => {
   expect(deriveDeploymentStatus("stopped", 1, [{ desiredState: "stopped", actualState: "running", healthStatus: "none", healthMessage: null }]).status).toBe("stopping");
   expect(deriveDeploymentStatus("stopped", 1, [{ desiredState: "stopped", actualState: "stopped", healthStatus: "none", healthMessage: null }]).status).toBe("stopped");

@@ -7,6 +7,8 @@ export function deriveDeploymentStatus(desiredState: string, replicas: number, w
     return { status: settled ? "stopped" : "stopping", failureReason: null };
   }
   const active = workloadItems.filter((workload) => workload.desiredState === "running");
+  const lost = active.find((workload) => workload.actualState === "lost");
+  if (lost) return { status: "degraded", failureReason: lost.healthMessage ?? "A workload was lost with its node" };
   const failure = active.find((workload) => workload.actualState === "failed");
   if (failure) return { status: active.some((workload) => workload.actualState === "running") ? "degraded" : "failed", failureReason: failure.healthMessage ?? "A workload failed" };
   if (active.some((workload) => workload.healthStatus === "unhealthy")) return { status: "degraded", failureReason: "A workload is unhealthy" };

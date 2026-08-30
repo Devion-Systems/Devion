@@ -754,6 +754,8 @@ routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/runtime", 
   const flatWorkloads = workloadItems.flat();
   const status = flatWorkloads.some((workload) => workload.actualState === "failed")
     ? "failed"
+    : flatWorkloads.some((workload) => workload.actualState === "lost")
+      ? "degraded"
     : flatWorkloads.some((workload) => workload.healthStatus === "unhealthy")
       ? "degraded"
       : flatWorkloads.some((workload) => workload.healthStatus === "starting")

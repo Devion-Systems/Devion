@@ -1,6 +1,6 @@
 import { type NodeSnapshot, scheduleWorkload, type WorkloadRequirements } from "@repo/core";
 import { agentCommands, db, deploymentEvents, deployments, nodes, workloads } from "@repo/db";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { refreshDeploymentStatus } from "./service.js";
@@ -15,9 +15,36 @@ const requirementsSchema = z.object({
   requiredLabels: z.record(z.string()).optional(),
   requiredNodeId: z.string().uuid().optional(),
 });
+const HEALTH_FAILURE_THRESHOLD = 3;
+const MAX_RECOVERY_ATTEMPTS = 5;
+const RECOVERY_BACKOFF_BASE_MS = 30_000;
+const RECOVERY_BACKOFF_MAX_MS = 10 * 60_000;
+const COMMAND_DEADLINE_MS = 2 * 60_000;
 
 /** Reconciles desired deployment state into durable agent commands; it never invokes a runtime itself. */
 export async function reconcileDeployment(deploymentId: string): Promise<void> {
+  const leaseId = crypto.randomUUID();
+  const now = new Date();
+  const [lease] = await db
+    .update(deployments)
+    .set({ reconcileLeaseId: leaseId, reconcileLeaseUntil: new Date(now.getTime() + 60_000) })
+    .where(and(
+      eq(deployments.id, deploymentId),
+      or(isNull(deployments.reconcileLeaseUntil), lt(deployments.reconcileLeaseUntil, now)),
+    ))
+    .returning({ id: deployments.id });
+  if (!lease) return;
+  try {
+    await reconcileDeploymentClaimed(deploymentId);
+  } finally {
+    await db
+      .update(deployments)
+      .set({ reconcileLeaseId: null, reconcileLeaseUntil: null })
+      .where(and(eq(deployments.id, deploymentId), eq(deployments.reconcileLeaseId, leaseId)));
+  }
+}
+
+async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
   const deployment = await db.query.deployments.findFirst({
     where: eq(deployments.id, deploymentId),
   });
@@ -37,16 +64,42 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
     return;
   }
 
-  const active = currentWorkloads.filter((workload) => workload.desiredState === "running");
+  const persistentVolumes = Boolean(z.object({ volumes: z.array(z.unknown()).optional() }).safeParse(deployment.runtimeConfig).data?.volumes?.length);
+  const unhealthy = currentWorkloads.filter((workload) =>
+    workload.desiredState === "running" &&
+    (workload.actualState === "failed" || workload.healthFailureCount >= HEALTH_FAILURE_THRESHOLD),
+  );
+  if (!persistentVolumes && unhealthy.length > 0) {
+    await Promise.all(unhealthy.map((workload) => requestStateChange(workload, "workload.stop")));
+    await db.insert(deploymentEvents).values(unhealthy.map((workload) => ({
+      id: crypto.randomUUID(), deploymentId: deployment.id, workloadId: workload.id, nodeId: workload.nodeId,
+      type: "workload.recovery_requested", message: "Workload retired for automatic recovery",
+      reason: workload.actualState === "failed" ? "RUNTIME_EXITED" : "HEALTH_CHECK_FAILED",
+    })));
+    await refreshDeploymentStatus(deployment.id);
+    return;
+  }
+  // A lost stateless workload is intentionally not counted: it must be
+  // replaced. Stateful workloads remain counted until their pinned node can
+  // report again; moving them without fencing can duplicate writable data.
+  const active = currentWorkloads.filter((workload) =>
+    workload.desiredState === "running" && (persistentVolumes || workload.actualState !== "lost"),
+  );
   const missingReplicas = Math.max(0, deployment.replicas - active.length);
   if (missingReplicas === 0) {
+    if (deployment.recoveryState !== "idle" && active.every((workload) => workload.actualState === "running" && (workload.healthStatus === "healthy" || workload.healthStatus === "none")))
+      await db.update(deployments).set({ recoveryAttempts: 0, recoveryNextAttemptAt: null, recoveryState: "idle" }).where(eq(deployments.id, deployment.id));
     await refreshDeploymentStatus(deployment.id);
     return;
   }
 
   const candidates = await loadCandidates();
-  const persistentVolumes = Boolean(z.object({ volumes: z.array(z.unknown()).optional() }).safeParse(deployment.runtimeConfig).data?.volumes?.length);
   for (let index = 0; index < missingReplicas; index += 1) {
+    if (deployment.recoveryState === "manual_intervention") {
+      await db.update(deployments).set({ status: "failed", failureReason: "Automatic recovery attempts exhausted" }).where(eq(deployments.id, deployment.id));
+      return;
+    }
+    if (deployment.recoveryNextAttemptAt && deployment.recoveryNextAttemptAt > new Date()) return;
     const decision = scheduleWorkload(candidates, requirements);
     const nodeId = decision.nodeId;
     if (!nodeId) {
@@ -55,6 +108,20 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
     }
     const workloadId = crypto.randomUUID();
     const commandId = crypto.randomUUID();
+    const replacement = currentWorkloads.find((workload) => workload.actualState === "lost" || workload.actualState === "failed" || workload.healthFailureCount >= HEALTH_FAILURE_THRESHOLD);
+    const replacementReason = replacement?.actualState === "lost"
+      ? "NODE_OFFLINE"
+      : replacement?.actualState === "failed"
+        ? "RUNTIME_EXITED"
+        : replacement ? "HEALTH_CHECK_FAILED" : undefined;
+    const recoveryAttempt = replacement ? deployment.recoveryAttempts + 1 : deployment.recoveryAttempts;
+    if (recoveryAttempt > MAX_RECOVERY_ATTEMPTS) {
+      await db.transaction(async (tx) => {
+        await tx.update(deployments).set({ recoveryState: "manual_intervention", status: "failed", failureReason: "Automatic recovery attempts exhausted" }).where(eq(deployments.id, deployment.id));
+        await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: deployment.id, workloadId: replacement?.id ?? null, type: "deployment.manual_intervention_required", message: "Automatic recovery attempts exhausted", reason: "RECOVERY_ATTEMPTS_EXHAUSTED" });
+      });
+      return;
+    }
     const pinnedRequirements = persistentVolumes && !requirements.requiredNodeId
       ? { ...requirements, requiredNodeId: nodeId }
       : requirements;
@@ -62,18 +129,25 @@ export async function reconcileDeployment(deploymentId: string): Promise<void> {
       if (pinnedRequirements !== requirements) {
         await tx.update(deployments).set({ requirements: pinnedRequirements }).where(eq(deployments.id, deployment.id));
       }
+      if (replacement) {
+        const backoffMs = Math.min(RECOVERY_BACKOFF_BASE_MS * 2 ** Math.max(0, recoveryAttempt - 1), RECOVERY_BACKOFF_MAX_MS);
+        await tx.update(deployments).set({ recoveryAttempts: recoveryAttempt, recoveryState: "backoff", recoveryNextAttemptAt: new Date(Date.now() + backoffMs) }).where(eq(deployments.id, deployment.id));
+      }
       await tx.insert(workloads).values({
         id: workloadId,
         deploymentId: deployment.id,
         nodeId,
         desiredState: "running",
         schedulingReasons: decision.reasons,
+        ...(replacement ? { replacementOfWorkloadId: replacement.id, replacementReason } : {}),
       });
+      if (replacement) await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: deployment.id, workloadId, nodeId, type: "workload.replacement_requested", message: "Replacement workload scheduled", reason: replacementReason! });
       await tx.insert(agentCommands).values({
         id: commandId,
         nodeId,
         type: "workload.start",
         resourceId: workloadId,
+        deadlineAt: new Date(Date.now() + COMMAND_DEADLINE_MS),
         payload: {
           workloadId,
           deploymentId: deployment.id,
@@ -162,6 +236,7 @@ async function requestStateChange(
       nodeId,
       type,
       resourceId: workload.id,
+      deadlineAt: new Date(Date.now() + COMMAND_DEADLINE_MS),
       payload: { workloadId: workload.id, ...(gracefulShutdownSeconds ? { gracefulShutdownSeconds } : {}) },
     });
   });

@@ -14,6 +14,7 @@ export type WorkloadActualState =
   | "running"
   | "stopped"
   | "failed"
+  | "lost"
   | "unknown";
 
 export interface ResourceQuantity {

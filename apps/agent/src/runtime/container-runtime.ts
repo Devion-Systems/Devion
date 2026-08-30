@@ -95,12 +95,15 @@ export class ContainerRuntime {
     );
   }
 
-  async inspect(workloadId: string): Promise<{ actualState: "running" | "stopped" | "failed" | "unknown"; healthStatus: "none" | "starting" | "healthy" | "unhealthy"; ports: Record<string, number> }> {
+  async inspect(workloadId: string): Promise<{ actualState: "running" | "stopped" | "failed" | "unknown"; healthStatus: "none" | "starting" | "healthy" | "unhealthy"; healthMessage?: string; ports: Record<string, number> }> {
     try {
-      const container = await this.request<{ State?: { Running?: boolean; Dead?: boolean; Error?: string; Health?: { Status?: string } }; NetworkSettings?: { Ports?: Record<string, Array<{ HostPort: string }> | null> } }>("GET", `/containers/${encodeURIComponent(this.name(workloadId))}/json`);
+      const container = await this.request<{ State?: { Running?: boolean; Dead?: boolean; Error?: string; Health?: { Status?: string; Log?: Array<{ Output?: string }> } }; NetworkSettings?: { Ports?: Record<string, Array<{ HostPort: string }> | null> } }>("GET", `/containers/${encodeURIComponent(this.name(workloadId))}/json`);
       const health = container.State?.Health?.Status;
       const healthStatus = health === "starting" || health === "healthy" || health === "unhealthy" ? health : "none";
-      return { actualState: container.State?.Running ? "running" : container.State?.Dead || container.State?.Error ? "failed" : "stopped", healthStatus, ports: publishedPorts(container.NetworkSettings?.Ports) };
+      const healthMessage = healthStatus === "unhealthy"
+        ? container.State?.Health?.Log?.at(-1)?.Output?.trim().slice(0, 1_000)
+        : undefined;
+      return { actualState: container.State?.Running ? "running" : container.State?.Dead || container.State?.Error ? "failed" : "stopped", healthStatus, ...(healthMessage ? { healthMessage } : {}), ports: publishedPorts(container.NetworkSettings?.Ports) };
     } catch (error) {
       if (error instanceof Error && error.message.includes("404")) return { actualState: "stopped", healthStatus: "none", ports: {} };
       return { actualState: "unknown", healthStatus: "none", ports: {} };

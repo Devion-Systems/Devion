@@ -195,7 +195,7 @@ async function workloadRegistryCredentials(identity: z.infer<typeof identitySche
   return payload.credentials ?? undefined;
 }
 
-const assignmentSchema = z.object({ workloadId: z.string().uuid(), cpuMilli: z.number().int().positive() });
+const assignmentSchema = z.object({ workloadId: z.string().uuid(), cpuMilli: z.number().int().positive(), reportGeneration: z.number().int().positive() });
 type Assignment = z.infer<typeof assignmentSchema>;
 const previousCpu = new Map<string, { timestamp: number; totalUsageNanos: number }>();
 let lastMetricsReportAt = 0;
@@ -222,9 +222,9 @@ async function workloadAssignments(identity: z.infer<typeof identitySchema>): Pr
 
 async function reportWorkloadTelemetry(identity: z.infer<typeof identitySchema>, assignments: Assignment[]): Promise<void> {
   const includePorts = Date.now() - lastPortReportAt >= config.DEVION_AGENT_METRICS_INTERVAL_MS;
-  const reports = await mapWithConcurrency(assignments, 8, async ({ workloadId }) => {
+  const reports = await mapWithConcurrency(assignments, 8, async ({ workloadId, reportGeneration }) => {
     const inspection = await runtime.inspect(workloadId);
-    return { workloadId, actualState: inspection.actualState, healthStatus: inspection.healthStatus, ...(includePorts ? { ports: inspection.ports } : {}) };
+    return { workloadId, reportGeneration, actualState: inspection.actualState, healthStatus: inspection.healthStatus, observedAt: new Date().toISOString(), ...(inspection.healthMessage ? { healthMessage: inspection.healthMessage } : {}), ...(includePorts ? { ports: inspection.ports } : {}) };
   });
   const accepted = await apiFetch(new URL("/api/agents/workloads/telemetry", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ reports }) });
   if (!accepted.ok) throw new Error(`Workload telemetry report failed: ${accepted.status}`);
