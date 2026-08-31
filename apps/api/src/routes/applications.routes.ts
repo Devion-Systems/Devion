@@ -17,8 +17,10 @@ import {
   environmentVariables,
   projectEnvironments,
   projects,
+  nodes,
   user,
   volumes,
+  workloadPorts,
   workloads,
 } from "@repo/db";
 import { hostPortPolicyError } from "@repo/core";
@@ -132,7 +134,7 @@ const buildConfigurationInput = z.object({
 });
 const runtimeConfigurationInput = z.object({ runtime: z.literal("container").default("container"), command: z.string().trim().min(1).max(2_000).nullable().optional(), workingDirectory: z.string().trim().min(1).max(512).refine((value) => value.startsWith("/")).nullable().optional(), restartPolicy: z.enum(["no", "on-failure", "always", "unless-stopped"]).default("unless-stopped"), gracefulShutdownSeconds: z.number().int().min(1).max(600).default(15), healthcheckCommand: z.string().trim().min(1).max(2_000).nullable().optional(), healthcheckIntervalSeconds: z.number().int().min(1).max(3_600).default(30), healthcheckTimeoutSeconds: z.number().int().min(1).max(600).default(5), healthcheckRetries: z.number().int().min(1).max(20).default(3), healthcheckStartPeriodSeconds: z.number().int().min(0).max(3_600).default(0), replicas: z.number().int().min(1).max(100).default(1) });
 const resourceConfigurationInput = z.object({ cpuMilli: z.number().int().min(1).max(256_000).default(250), memoryMib: z.number().int().min(16).max(1_048_576).default(256), storageMib: z.number().int().min(0).max(1_048_576).default(0) });
-const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); if (port.externalPort && port.exposure !== "public") ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: "An external port requires public exposure" }); const policy = port.externalPort ? hostPortPolicyError(port.externalPort) : null; if (policy) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "externalPort"], message: policy }); seen.add(key); }); });
+const portsInput = z.array(z.object({ name: z.string().trim().min(1).max(64).nullable().optional(), internalPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).default("tcp"), exposure: z.enum(["private", "public"]).default("private"), requestedHostPort: z.number().int().min(1).max(65_535).nullable().optional(), externalPort: z.number().int().min(1).max(65_535).nullable().optional(), description: z.string().trim().max(500).nullable().optional() })).max(32).superRefine((ports, ctx) => { const seen = new Set<string>(); ports.forEach((port, index) => { const key = `${port.internalPort}/${port.protocol}`; const requestedHostPort = port.requestedHostPort ?? port.externalPort; if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "internalPort"], message: "Duplicate internal port and protocol" }); if (port.requestedHostPort && port.externalPort && port.requestedHostPort !== port.externalPort) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "requestedHostPort"], message: "Requested and legacy external port must match" }); if (requestedHostPort && port.exposure !== "public") ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "requestedHostPort"], message: "A requested host port requires public exposure" }); const policy = requestedHostPort ? hostPortPolicyError(requestedHostPort) : null; if (policy) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "requestedHostPort"], message: policy }); seen.add(key); }); });
 const mountPath = z.string().trim().min(1).max(512).refine(isSafeMountPath, "Mount path must be an absolute, normalized container path");
 const volumeMountInput = z.object({
   volumeId: z.string().uuid().optional(),
@@ -593,6 +595,47 @@ routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/configurat
   return c.json({ application, build: build ?? null, runtime: runtime ?? null, resources: resources ?? null, ports, volumes, secrets, environments, applicationVariables });
 });
 
+/** Public L4 endpoints are derived from bound runtime ports, never assembled by the dashboard. */
+routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/networking", async (c) => {
+  const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
+  if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
+  const application = await applicationInScope(scope, c.req.param("applicationId"));
+  if (!application) return c.json({ error: "Application not found" }, 404);
+  const bindings = await db
+    .select({
+      workloadId: workloads.id,
+      actualState: workloads.actualState,
+      containerPort: workloadPorts.containerPort,
+      hostPort: workloadPorts.hostPort,
+      protocol: workloadPorts.protocol,
+      exposure: workloadPorts.exposure,
+      bindAddress: workloadPorts.bindAddress,
+      bindingStatus: workloadPorts.status,
+      observedAt: workloadPorts.observedAt,
+      nodeStatus: nodes.status,
+      publicNetworkingEnabled: nodes.publicNetworkingEnabled,
+      publicAddress: nodes.publicAddress,
+    })
+    .from(workloads)
+    .innerJoin(deployments, eq(workloads.deploymentId, deployments.id))
+    .innerJoin(nodes, eq(workloads.nodeId, nodes.id))
+    .innerJoin(workloadPorts, eq(workloadPorts.workloadId, workloads.id))
+    .where(and(eq(deployments.applicationId, application.id), eq(workloadPorts.exposure, "public")));
+  return c.json(bindings.map((binding) => {
+    const available = binding.bindingStatus === "bound" && binding.actualState === "running" && binding.nodeStatus === "ready" && binding.publicNetworkingEnabled === 1 && Boolean(binding.publicAddress);
+    return {
+      workloadId: binding.workloadId,
+      containerPort: binding.containerPort,
+      hostPort: binding.hostPort,
+      protocol: binding.protocol,
+      bindAddress: binding.bindAddress,
+      observedAt: binding.observedAt,
+      status: available ? "bound" : "unavailable",
+      ...(available ? { endpoint: { protocol: binding.protocol, host: binding.publicAddress!, port: binding.hostPort, public: true } } : {}),
+    };
+  }));
+});
+
 routes.get("/:orgSlug/projects/:projectId/applications/:applicationId/activity", async (c) => {
   const scope = await getProjectScope(c.req.raw, c.req.param("orgSlug"), c.req.param("projectId"));
   if (!scope) return c.json({ error: "Project not found or access denied" }, 404);
@@ -641,7 +684,7 @@ routes.put("/:orgSlug/projects/:projectId/applications/:applicationId/ports", as
   if (!scope.permissions.includes("applications.update")) return c.json({ error: "Permission required: applications.update" }, 403);
   const application = await applicationInScope(scope, c.req.param("applicationId")); if (!application) return c.json({ error: "Application not found" }, 404);
   const parsed = portsInput.safeParse(await c.req.json()); if (!parsed.success) return c.json({ error: "Invalid port configuration", issues: parsed.error.flatten() }, 400);
-  await db.transaction(async (tx) => { await tx.delete(applicationPorts).where(eq(applicationPorts.applicationId, application.id)); if (parsed.data.length) await tx.insert(applicationPorts).values(parsed.data.map((port) => ({ id: crypto.randomUUID(), applicationId: application.id, ...port, requestedHostPort: port.externalPort ?? null }))); });
+  await db.transaction(async (tx) => { await tx.delete(applicationPorts).where(eq(applicationPorts.applicationId, application.id)); if (parsed.data.length) await tx.insert(applicationPorts).values(parsed.data.map(({ requestedHostPort, externalPort, ...port }) => ({ id: crypto.randomUUID(), applicationId: application.id, ...port, requestedHostPort: requestedHostPort ?? externalPort ?? null, externalPort: requestedHostPort ?? externalPort ?? null }))); });
   await recordAudit("application.ports_updated", application.id, scope.userId, c.req.raw, scope.project.id); return c.json(await db.select().from(applicationPorts).where(eq(applicationPorts.applicationId, application.id)));
 });
 
@@ -860,7 +903,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
   const ports = configuredPorts.length ? configuredPorts : [{ internalPort: application.internalPort, protocol: "tcp" as const, exposure: "private" as const, externalPort: null }];
   const runtimeConfig = {
     environment,
-    ports: ports.map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure, ...(port.externalPort ? { externalPort: port.externalPort } : {}) })),
+    ports: ports.map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure, ...((port.requestedHostPort ?? port.externalPort) ? { requestedHostPort: port.requestedHostPort ?? port.externalPort } : {}) })),
     volumes: configuredVolumes.map((volume) => ({ ...(volume.volumeId ? { id: volume.volumeId } : {}), name: volume.volumeName, target: volume.mountPath, readOnly: volume.readOnly })),
     restartPolicy: runtimeDefaults?.restartPolicy ?? "unless-stopped",
     gracefulShutdownSeconds: runtimeDefaults?.gracefulShutdownSeconds ?? 15,

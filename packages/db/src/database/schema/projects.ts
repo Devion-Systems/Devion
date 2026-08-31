@@ -237,8 +237,11 @@ export const applicationPorts = pgTable(
     protocol: text("protocol", { enum: ["tcp", "udp"] }).default("tcp").notNull(),
     exposure: text("exposure", { enum: ["private", "public"] }).default("private").notNull(),
     requestedHostPort: integer("requested_host_port"),
+    /** Compatibility mirror of requestedHostPort for pre-V1 clients. */
     externalPort: integer("external_port"),
     description: text("description"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
   },
   (table) => [
     uniqueIndex("application_ports_unique_port_uidx").on(table.applicationId, table.internalPort, table.protocol),

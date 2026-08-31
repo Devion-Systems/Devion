@@ -8,14 +8,16 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 
-type Node = { name: string; schedulingEnabled: boolean; advertisedAddress: string | null };
-type NodeSettings = { schedulingEnabled?: boolean; advertisedAddress?: string | null };
+type Node = { name: string; schedulingEnabled: boolean; advertisedAddress: string | null; publicNetworkingEnabled: boolean; publicAddress: string | null };
+type NodeSettings = { schedulingEnabled?: boolean; advertisedAddress?: string | null; publicNetworkingEnabled?: boolean; publicAddress?: string | null };
 const api = (path: string) => `${process.env.NEXT_PUBLIC_API_URL ?? ""}${path}`;
 
 export default function HardwareSettingsPage() {
   const { orgSlug, nodeId } = useParams<{ orgSlug: string; nodeId: string }>();
   const client = useQueryClient();
   const [advertisedAddress, setAdvertisedAddress] = useState("");
+  const [publicNetworkingEnabled, setPublicNetworkingEnabled] = useState(false);
+  const [publicAddress, setPublicAddress] = useState("");
   const node = useQuery<Node>({
     queryKey: ["org", orgSlug, "node", nodeId],
     queryFn: async () => {
@@ -25,7 +27,11 @@ export default function HardwareSettingsPage() {
     },
   });
   useEffect(() => {
-    if (node.data) setAdvertisedAddress(node.data.advertisedAddress ?? "");
+    if (node.data) {
+      setAdvertisedAddress(node.data.advertisedAddress ?? "");
+      setPublicNetworkingEnabled(node.data.publicNetworkingEnabled);
+      setPublicAddress(node.data.publicAddress ?? "");
+    }
   }, [node.data]);
   const update = useMutation({
     mutationFn: async (values: NodeSettings) => {
@@ -62,6 +68,16 @@ export default function HardwareSettingsPage() {
       </div>
       {!node.data?.advertisedAddress ? <p className="mt-3 text-sm text-amber-300">Ohne Workload-Adresse kann dieser Node keine Domain-Backends bereitstellen.</p> : null}
       {update.error ? <p role="alert" className="mt-3 text-sm text-red-300">{update.error.message}</p> : null}
+    </section>
+    <section className="max-w-2xl rounded-2xl border border-white/[0.08] bg-[#172128] p-6">
+      <h2 className="font-medium text-zinc-100">Öffentliches TCP/UDP Networking</h2>
+      <p className="mt-2 text-sm leading-6 text-zinc-500">Erlaubt Public-Port-Bindings auf diesem Node. Die Adresse wird ausschließlich für bestätigte, laufende Bindings als Endpunkt angezeigt; Firewall, NAT und DNS werden nicht automatisch geändert.</p>
+      <label className="mt-5 flex items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={publicNetworkingEnabled} onChange={(event) => setPublicNetworkingEnabled(event.target.checked)} className="size-4" />Öffentliche Port-Bindings aktivieren</label>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <input value={publicAddress} onChange={(event) => setPublicAddress(event.target.value)} disabled={!publicNetworkingEnabled} placeholder="game.example.com oder 203.0.113.10" className="min-w-64 flex-1 rounded-lg border border-white/[0.1] bg-[#0b1217] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-50" />
+        <Button disabled={!node.data || update.isPending} onClick={() => update.mutate({ publicNetworkingEnabled, publicAddress: publicNetworkingEnabled ? publicAddress.trim() || null : null })}>Public Networking speichern</Button>
+      </div>
+      {publicNetworkingEnabled && !publicAddress.trim() ? <p className="mt-3 text-sm text-amber-300">Zum Aktivieren ist eine öffentliche Hostname- oder IP-Adresse erforderlich.</p> : null}
     </section>
   </div>;
 }

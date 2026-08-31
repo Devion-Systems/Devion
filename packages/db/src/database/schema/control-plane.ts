@@ -54,6 +54,9 @@ export const nodes = pgTable(
     hostname: text("hostname").notNull(),
     /** Explicit, operator-configured address reachable by the Traefik hosts. */
     advertisedAddress: text("advertised_address"),
+    /** Direct L4 exposure is opt-in; this address is never used for Traefik upstreams. */
+    publicNetworkingEnabled: integer("public_networking_enabled").notNull().default(0),
+    publicAddress: text("public_address"),
     status: text("status", {
       enum: ["provisioning", "ready", "draining", "offline", "unhealthy", "decommissioned"],
     })
@@ -215,15 +218,22 @@ export const workloadPorts = pgTable(
   "workload_ports",
   {
     workloadId: text("workload_id").notNull().references(() => workloads.id, { onDelete: "cascade" }),
+    nodeId: text("node_id").references(() => nodes.id, { onDelete: "cascade" }),
     containerPort: integer("container_port").notNull(),
     hostPort: integer("host_port").notNull(),
     protocol: text("protocol", { enum: ["tcp", "udp"] }).notNull(),
     exposure: text("exposure", { enum: ["private", "public"] }).notNull(),
+    /** Server-selected only. Public bindings use 0.0.0.0 in V1. */
+    bindAddress: text("bind_address"),
+    status: text("status", { enum: ["reserved", "bound", "released"] }).notNull().default("bound"),
     observedAt: timestamp("observed_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
   },
   (table) => [
     uniqueIndex("workload_ports_workload_container_protocol_uidx").on(table.workloadId, table.containerPort, table.protocol),
     index("workload_ports_workload_idx").on(table.workloadId),
+    index("workload_ports_node_status_idx").on(table.nodeId, table.status),
   ],
 );
 
@@ -238,6 +248,8 @@ export const nodePortReservations = pgTable(
     hostPort: integer("host_port").notNull(),
     protocol: text("protocol", { enum: ["tcp", "udp"] }).notNull(),
     status: text("status", { enum: ["reserved", "bound", "released"] }).notNull().default("reserved"),
+    boundAt: timestamp("bound_at"),
+    releasedAt: timestamp("released_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
   },

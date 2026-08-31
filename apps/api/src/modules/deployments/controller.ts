@@ -23,7 +23,7 @@ const COMMAND_DEADLINE_MS = 2 * 60_000;
 const runtimeVolumesSchema = z.object({
   volumes: z.array(z.object({ id: z.string().uuid().optional(), name: z.string().min(1) }).passthrough()).optional(),
 });
-const runtimePortsSchema = z.object({ ports: z.array(z.object({ containerPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).optional(), exposure: z.enum(["private", "public"]).optional(), externalPort: z.number().int().min(1).max(65_535).optional() })).optional() });
+const runtimePortsSchema = z.object({ ports: z.array(z.object({ containerPort: z.number().int().min(1).max(65_535), protocol: z.enum(["tcp", "udp"]).optional(), exposure: z.enum(["private", "public"]).optional(), requestedHostPort: z.number().int().min(1).max(65_535).optional(), externalPort: z.number().int().min(1).max(65_535).optional() })).optional() });
 
 /** Reconciles desired deployment state into durable agent commands; it never invokes a runtime itself. */
 export async function reconcileDeployment(deploymentId: string): Promise<void> {
@@ -70,7 +70,12 @@ async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
 
   const runtimeVolumes = runtimeVolumesSchema.safeParse(deployment.runtimeConfig).data?.volumes ?? [];
   const configuredRuntimePorts = runtimePortsSchema.safeParse(deployment.runtimeConfig).data?.ports ?? [];
-  const requestedHostPorts = configuredRuntimePorts.flatMap((port) => port.exposure === "public" && port.externalPort ? [{ hostPort: port.externalPort, protocol: port.protocol ?? "tcp", containerPort: port.containerPort }] : []);
+  const requestedHostPorts = configuredRuntimePorts.flatMap((port) => {
+    const requestedHostPort = port.requestedHostPort ?? port.externalPort;
+    return port.exposure === "public" && requestedHostPort
+      ? [{ hostPort: requestedHostPort, protocol: port.protocol ?? "tcp", containerPort: port.containerPort }]
+      : [];
+  });
   if (requestedHostPorts.length > 0 && deployment.replicas > 1) {
     await db.update(deployments).set({ status: "failed", failureReason: "Fixed public host ports require a single replica" }).where(eq(deployments.id, deployment.id));
     return;
@@ -165,7 +170,7 @@ async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
     const assignedHostPorts = configuredRuntimePorts.flatMap((port) => {
       if (port.exposure !== "public") return [];
       const protocol = port.protocol ?? "tcp";
-      const hostPort = port.externalPort ?? chooseDynamicHostPort(occupiedByProtocol.get(protocol)!, `${workloadId}:${port.containerPort}/${protocol}`);
+      const hostPort = port.requestedHostPort ?? port.externalPort ?? chooseDynamicHostPort(occupiedByProtocol.get(protocol)!, `${workloadId}:${port.containerPort}/${protocol}`);
       if (!hostPort) return [];
       occupiedByProtocol.get(protocol)!.add(hostPort);
       return [{ containerPort: port.containerPort, protocol, hostPort }];
@@ -174,10 +179,12 @@ async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
       await db.update(deployments).set({ status: "failed", failureReason: "No dynamic host port is available on the selected node" }).where(eq(deployments.id, deployment.id));
       return;
     }
-    const commandRuntimeConfig = structuredClone(deployment.runtimeConfig) as { ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp"; exposure?: "private" | "public"; externalPort?: number }> };
+    const commandRuntimeConfig = structuredClone(deployment.runtimeConfig) as { ports?: Array<{ containerPort: number; protocol?: "tcp" | "udp"; exposure?: "private" | "public"; requestedHostPort?: number; externalPort?: number }> };
     if (commandRuntimeConfig.ports) commandRuntimeConfig.ports = commandRuntimeConfig.ports.map((port) => {
       const assigned = assignedHostPorts.find((item) => item.containerPort === port.containerPort && item.protocol === (port.protocol ?? "tcp"));
-      return assigned ? { ...port, externalPort: assigned.hostPort } : port;
+      if (!assigned) return port;
+      const { requestedHostPort: _requestedHostPort, ...runtimePort } = port;
+      return { ...runtimePort, externalPort: assigned.hostPort };
     });
     const replacement = currentWorkloads.find((workload) => workload.actualState === "lost" || workload.actualState === "failed" || workload.healthFailureCount >= HEALTH_FAILURE_THRESHOLD);
     const replacementReason = replacement?.actualState === "lost"
@@ -196,42 +203,51 @@ async function reconcileDeploymentClaimed(deploymentId: string): Promise<void> {
     const pinnedRequirements = persistentVolumes && !requirements.requiredNodeId
       ? { ...requirements, requiredNodeId: nodeId }
       : requirements;
-    await db.transaction(async (tx) => {
-      if (pinnedRequirements !== requirements) {
-        await tx.update(deployments).set({ requirements: pinnedRequirements }).where(eq(deployments.id, deployment.id));
-      }
-      if (replacement) {
-        const backoffMs = Math.min(RECOVERY_BACKOFF_BASE_MS * 2 ** Math.max(0, recoveryAttempt - 1), RECOVERY_BACKOFF_MAX_MS);
-        await tx.update(deployments).set({ recoveryAttempts: recoveryAttempt, recoveryState: "backoff", recoveryNextAttemptAt: new Date(Date.now() + backoffMs) }).where(eq(deployments.id, deployment.id));
-      }
-      await tx.insert(workloads).values({
-        id: workloadId,
-        deploymentId: deployment.id,
-        nodeId,
-        desiredState: "running",
-        schedulingReasons: decision.reasons,
-        ...(replacement ? { replacementOfWorkloadId: replacement.id, replacementReason } : {}),
-      });
-      if (assignedHostPorts.length) await tx.insert(nodePortReservations).values(assignedHostPorts.map((port) => ({
-        id: crypto.randomUUID(), nodeId, workloadId, containerPort: port.containerPort, hostPort: port.hostPort, protocol: port.protocol, status: "reserved" as const,
-      })));
-      if (replacement) await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: deployment.id, workloadId, nodeId, type: "workload.replacement_requested", message: "Replacement workload scheduled", reason: replacementReason! });
-      await tx.insert(agentCommands).values({
-        id: commandId,
-        nodeId,
-        type: "workload.start",
-        resourceId: workloadId,
-        deadlineAt: new Date(Date.now() + COMMAND_DEADLINE_MS),
-        payload: {
-          workloadId,
+    try {
+      await db.transaction(async (tx) => {
+        if (pinnedRequirements !== requirements) {
+          await tx.update(deployments).set({ requirements: pinnedRequirements }).where(eq(deployments.id, deployment.id));
+        }
+        if (replacement) {
+          const backoffMs = Math.min(RECOVERY_BACKOFF_BASE_MS * 2 ** Math.max(0, recoveryAttempt - 1), RECOVERY_BACKOFF_MAX_MS);
+          await tx.update(deployments).set({ recoveryAttempts: recoveryAttempt, recoveryState: "backoff", recoveryNextAttemptAt: new Date(Date.now() + backoffMs) }).where(eq(deployments.id, deployment.id));
+        }
+        await tx.insert(workloads).values({
+          id: workloadId,
           deploymentId: deployment.id,
-          image: deployment.image,
-          runtime: deployment.runtime,
-          requirements,
-          runtimeConfig: commandRuntimeConfig,
-        },
+          nodeId,
+          desiredState: "running",
+          schedulingReasons: decision.reasons,
+          ...(replacement ? { replacementOfWorkloadId: replacement.id, replacementReason } : {}),
+        });
+        if (assignedHostPorts.length) await tx.insert(nodePortReservations).values(assignedHostPorts.map((port) => ({
+          id: crypto.randomUUID(), nodeId, workloadId, containerPort: port.containerPort, hostPort: port.hostPort, protocol: port.protocol, status: "reserved" as const,
+        })));
+        if (replacement) await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: deployment.id, workloadId, nodeId, type: "workload.replacement_requested", message: "Replacement workload scheduled", reason: replacementReason! });
+        await tx.insert(agentCommands).values({
+          id: commandId,
+          nodeId,
+          type: "workload.start",
+          resourceId: workloadId,
+          deadlineAt: new Date(Date.now() + COMMAND_DEADLINE_MS),
+          payload: {
+            workloadId,
+            deploymentId: deployment.id,
+            image: deployment.image,
+            runtime: deployment.runtime,
+            requirements,
+            runtimeConfig: commandRuntimeConfig,
+          },
+        });
       });
-    });
+    } catch (error) {
+      if ((error as { code?: string }).code !== "23505") throw error;
+      await db.transaction(async (tx) => {
+        await tx.update(deployments).set({ status: "failed", failureReason: "Requested public host port is no longer available" }).where(eq(deployments.id, deployment.id));
+        await tx.insert(deploymentEvents).values({ id: crypto.randomUUID(), deploymentId: deployment.id, nodeId, type: "workload.port_reservation_failed", message: "Requested public host port is no longer available", reason: "PORT_UNAVAILABLE" });
+      });
+      return;
+    }
     requirements = pinnedRequirements;
     reserve(candidates, nodeId, requirements);
   }

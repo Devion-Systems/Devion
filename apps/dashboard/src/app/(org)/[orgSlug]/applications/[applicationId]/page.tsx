@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Box, GitBranch, Play, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Box, Copy, GitBranch, Play, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -54,6 +54,7 @@ type Configuration = {
     protocol: string;
     exposure: string;
     externalPort: number | null;
+    requestedHostPort?: number | null;
   }>;
   volumes: Array<{
     id: string;
@@ -95,6 +96,16 @@ type Runtime = {
     restartCount: number;
   }>;
 };
+type Networking = Array<{
+  workloadId: string;
+  containerPort: number;
+  hostPort: number;
+  protocol: "tcp" | "udp";
+  bindAddress: string | null;
+  observedAt: string;
+  status: "bound" | "unavailable";
+  endpoint?: { protocol: "tcp" | "udp"; host: string; port: number; public: true };
+}>;
 type ActivityEntry = { id: string; action: string; metadata: string | null; createdAt: string; actorName: string | null; actorEmail: string | null };
 type WorkloadLogs = { workloads: Array<{ workloadId: string; status: string; logs: string; updatedAt: string | null }> };
 type Metrics = { samples: Array<{ timestamp: string; cpuAverage: number | null; cpuMax: number | null; memoryAverageBytes: number; memoryMaxBytes: number; networkRxBytesPerSecond: number; networkTxBytesPerSecond: number; diskReadBytesPerSecond: number; diskWriteBytesPerSecond: number }> };
@@ -221,6 +232,19 @@ export default function ApplicationDetailPage() {
       );
       if (!response.ok)
         throw new Error("Laufzeitdaten konnten nicht geladen werden");
+      return response.json();
+    },
+  });
+  const networking = useQuery<Networking>({
+    enabled: Boolean(application),
+    queryKey: ["application", applicationId, "networking"],
+    refetchInterval: 10_000,
+    queryFn: async () => {
+      const response = await fetch(
+        api(`/organizations/${orgSlug}/projects/${application!.projectId}/applications/${applicationId}/networking`),
+        { credentials: "include" },
+      );
+      if (!response.ok) throw new Error("Netzwerkstatus konnte nicht geladen werden");
       return response.json();
     },
   });
@@ -905,6 +929,20 @@ export default function ApplicationDetailPage() {
             ) : (
               <p className="text-zinc-500">Keine Ports konfiguriert.</p>
             )}
+            {networking.isLoading ? <p className="text-zinc-500">Öffentliche Endpunkte werden geladen …</p> : null}
+            {networking.data?.map((binding) => (
+              <div key={`${binding.workloadId}-${binding.containerPort}-${binding.protocol}`} className="rounded-xl bg-white/[0.035] px-3 py-2 text-xs">
+                {binding.endpoint ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-[#81ecec]">{binding.endpoint.protocol.toUpperCase()}: {binding.endpoint.host}:{binding.endpoint.port}</span>
+                    <Button size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(`${binding.endpoint!.host}:${binding.endpoint!.port}`)}><Copy className="size-3" />Kopieren</Button>
+                  </div>
+                ) : (
+                  <p className="text-amber-300">{binding.protocol.toUpperCase()}:{binding.hostPort} ist gebunden, aber derzeit nicht öffentlich erreichbar.</p>
+                )}
+              </div>
+            ))}
+            {!networking.isLoading && config?.ports.some((port) => port.exposure === "public") && !networking.data?.length ? <p className="text-zinc-500">Noch kein aktives öffentliches Port-Binding vorhanden.</p> : null}
             {config?.volumes.map((volume) => (
               <p
                 key={volume.id}

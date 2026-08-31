@@ -67,7 +67,7 @@ const heartbeatInput = z.object({
     storageMib: resourceQuantity,
   }),
 });
-const nodeSettingsInput = z.object({ schedulingEnabled: z.boolean().optional(), advertisedAddress: z.string().trim().min(1).max(253).nullable().optional() }).refine((value) => Object.keys(value).length > 0);
+const nodeSettingsInput = z.object({ schedulingEnabled: z.boolean().optional(), advertisedAddress: z.string().trim().min(1).max(253).nullable().optional(), publicNetworkingEnabled: z.boolean().optional(), publicAddress: z.string().trim().min(1).max(253).nullable().optional() }).refine((value) => Object.keys(value).length > 0);
 const commandResultInput = z
   .object({
     commandId: z.string().uuid(),
@@ -157,6 +157,8 @@ routes.get("/organizations/:orgSlug/nodes", async (c) => {
       name: nodes.name,
       hostname: nodes.hostname,
       advertisedAddress: nodes.advertisedAddress,
+      publicNetworkingEnabled: nodes.publicNetworkingEnabled,
+      publicAddress: nodes.publicAddress,
       status: nodes.status,
       architecture: nodes.architecture,
       os: nodes.os,
@@ -220,36 +222,46 @@ routes.patch("/organizations/:orgSlug/nodes/:nodeId", async (c) => {
   const parsed = nodeSettingsInput.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: "Invalid node settings" }, 400);
   let advertisedAddress: string | null | undefined = parsed.data.advertisedAddress;
+  let publicAddress: string | null | undefined = parsed.data.publicAddress;
   if (advertisedAddress) {
     try { advertisedAddress = normalizeAdvertisedAddress(advertisedAddress); }
     catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid advertised address" }, 400); }
   }
+  if (publicAddress) {
+    try { publicAddress = normalizeAdvertisedAddress(publicAddress); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid public address" }, 400); }
+  }
+  const existing = await db.query.nodes.findFirst({ where: and(eq(nodes.id, c.req.param("nodeId")), or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId))) });
+  if (!existing) return c.json({ error: "Node not found" }, 404);
+  const publicNetworkingEnabled = parsed.data.publicNetworkingEnabled ?? existing.publicNetworkingEnabled === 1;
+  const resolvedPublicAddress = publicAddress === undefined ? existing.publicAddress : publicAddress;
+  if (publicNetworkingEnabled && !resolvedPublicAddress) return c.json({ error: "A public address is required when public networking is enabled" }, 400);
   const updated = await db
     .update(nodes)
-    .set({ ...(parsed.data.schedulingEnabled === undefined ? {} : { schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0 }), ...(advertisedAddress !== undefined ? { advertisedAddress } : {}), updatedAt: new Date() })
+    .set({ ...(parsed.data.schedulingEnabled === undefined ? {} : { schedulingEnabled: parsed.data.schedulingEnabled ? 1 : 0 }), ...(advertisedAddress !== undefined ? { advertisedAddress } : {}), ...(parsed.data.publicNetworkingEnabled === undefined ? {} : { publicNetworkingEnabled: publicNetworkingEnabled ? 1 : 0 }), ...(publicAddress !== undefined ? { publicAddress } : {}), updatedAt: new Date() })
     .where(
       and(
         eq(nodes.id, c.req.param("nodeId")),
         or(eq(nodes.organizationId, access.org.id), isNull(nodes.organizationId)),
       ),
     )
-    .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled, advertisedAddress: nodes.advertisedAddress });
+    .returning({ id: nodes.id, schedulingEnabled: nodes.schedulingEnabled, advertisedAddress: nodes.advertisedAddress, publicNetworkingEnabled: nodes.publicNetworkingEnabled, publicAddress: nodes.publicAddress });
   if (!updated[0]) return c.json({ error: "Node not found" }, 404);
-  if (advertisedAddress !== undefined) {
+  if (advertisedAddress !== undefined || publicAddress !== undefined || parsed.data.publicNetworkingEnabled !== undefined) {
     await db.insert(auditLogs).values({
       id: crypto.randomUUID(),
       actorId: access.userId,
-      action: "node.advertised_address_updated",
+      action: "node.networking_updated",
       targetType: "node",
       targetId: updated[0].id,
-      metadata: JSON.stringify({ organizationId: access.org.id, advertisedAddress: updated[0].advertisedAddress }),
+      metadata: JSON.stringify({ organizationId: access.org.id, advertisedAddress: updated[0].advertisedAddress, publicNetworkingEnabled: updated[0].publicNetworkingEnabled === 1, publicAddress: updated[0].publicAddress }),
       ipAddress: c.req.header("x-real-ip") ?? null,
     });
     void reconcileDomainRoutesForNode(updated[0].id).catch((error) =>
       c.get("logger").error({ error, nodeId: updated[0].id }, "Unable to reconcile routes after advertised address change"),
     );
   }
-  return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1, advertisedAddress: updated[0].advertisedAddress });
+  return c.json({ id: updated[0].id, schedulingEnabled: updated[0].schedulingEnabled === 1, advertisedAddress: updated[0].advertisedAddress, publicNetworkingEnabled: updated[0].publicNetworkingEnabled === 1, publicAddress: updated[0].publicAddress });
 });
 
 /** Public enrollment endpoint. It accepts only a single-use registration secret, never a user session. */
@@ -456,7 +468,7 @@ async function replaceObservedWorkloadPorts(nodeId: string, workloadId: string, 
     const containerPort = Number(match[1]); const protocol = match[2] as "tcp" | "udp";
     const configuredPort = configured.find((item) => item.containerPort === containerPort && (item.protocol ?? "tcp") === protocol);
     if (!configuredPort || (configuredPort.exposure ?? "private") !== "public") return [];
-    return [{ workloadId, containerPort, hostPort, protocol, exposure: "public" as const, observedAt: new Date() }];
+    return [{ workloadId, nodeId, containerPort, hostPort, protocol, exposure: "public" as const, bindAddress: "0.0.0.0", status: "bound" as const, observedAt: new Date() }];
   });
   await db.transaction(async (tx) => {
     await tx.delete(workloadPorts).where(eq(workloadPorts.workloadId, workloadId));
@@ -590,12 +602,19 @@ routes.post("/api/agents/commands/results", async (c) => {
   if (!command) return c.json({ error: "Command result could not be persisted" }, 500);
   if (command.type === "workload.start") {
     const runtime = runtimeResult.safeParse(result.data);
+    const startSucceeded = result.status === "succeeded" && runtime.success;
+    if (!startSucceeded && result.status === "succeeded") {
+      await db.update(agentCommands).set({
+        status: "failed",
+        result: { ...result, status: "failed", error: { code: "INVALID_RUNTIME_RESULT", message: "Successful workload.start results require a runtime ID" } },
+      }).where(eq(agentCommands.id, command.id));
+    }
     await db
       .update(workloads)
       .set({
-        actualState: result.status === "succeeded" ? "running" : "failed",
-        ...(runtime.success ? { runtimeId: runtime.data.runtimeId } : {}),
-        ...(runtime.success && runtime.data.ports ? { publishedPorts: runtime.data.ports } : {}),
+        actualState: startSucceeded ? "running" : "failed",
+        ...(startSucceeded && runtime.success ? { runtimeId: runtime.data.runtimeId } : {}),
+        ...(startSucceeded && runtime.success && runtime.data.ports ? { publishedPorts: runtime.data.ports } : {}),
         lastReportedAt: new Date(),
       })
       .where(and(eq(workloads.id, command.resourceId), eq(workloads.nodeId, node.id)));
@@ -605,15 +624,15 @@ routes.post("/api/agents/commands/results", async (c) => {
     if (workload) {
       await db.insert(deploymentEvents).values({
         id: crypto.randomUUID(), deploymentId: workload.deploymentId, workloadId: workload.id, nodeId: node.id,
-        type: result.status === "succeeded" ? "workload.started" : "workload.start_failed",
-        message: result.status === "succeeded" ? "Workload started on agent" : "Agent failed to start workload",
-        reason: result.status === "succeeded" ? null : typeof (result.data as { error?: unknown } | undefined)?.error === "string" ? (result.data as { error: string }).error : null,
+        type: startSucceeded ? "workload.started" : "workload.start_failed",
+        message: startSucceeded ? "Workload started on agent" : "Agent failed to start workload",
+        reason: startSucceeded ? null : runtime.success ? result.error?.code ?? "AGENT_START_FAILED" : "INVALID_RUNTIME_RESULT",
       });
       const deployment = await db.query.deployments.findFirst({
         where: eq(deployments.id, workload.deploymentId),
       });
       if (deployment) {
-        if (result.status === "succeeded") {
+        if (startSucceeded) {
           const port = runtime.success ? runtime.data.ports?.["25565/tcp"] : undefined;
           await db
             .update(gameServers)
@@ -628,10 +647,10 @@ routes.post("/api/agents/commands/results", async (c) => {
       }
       await refreshDeploymentStatus(workload.deploymentId);
     }
-    if (runtime.success && runtime.data.ports) {
+    if (startSucceeded && runtime.success && runtime.data.ports) {
       await replaceObservedWorkloadPorts(node.id, command.resourceId, runtime.data.ports);
     }
-    await db.update(nodePortReservations).set({ status: result.status === "succeeded" ? "bound" : "released" }).where(eq(nodePortReservations.workloadId, command.resourceId));
+    await db.update(nodePortReservations).set(startSucceeded ? { status: "bound", boundAt: new Date(), releasedAt: null } : { status: "released", releasedAt: new Date() }).where(eq(nodePortReservations.workloadId, command.resourceId));
     void reconcileDomainRoutesForNode(node.id).catch((error) =>
       c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload start"),
     );
@@ -655,7 +674,7 @@ routes.post("/api/agents/commands/results", async (c) => {
     void reconcileDomainRoutesForNode(node.id).catch((error) =>
       c.get("logger").error({ error, nodeId: node.id }, "Unable to reconcile routes after workload stop"),
     );
-    if (result.status === "succeeded") await db.update(nodePortReservations).set({ status: "released" }).where(eq(nodePortReservations.workloadId, command.resourceId));
+    if (result.status === "succeeded") await db.update(nodePortReservations).set({ status: "released", releasedAt: new Date() }).where(eq(nodePortReservations.workloadId, command.resourceId));
   }
   return c.body(null, 204);
 });

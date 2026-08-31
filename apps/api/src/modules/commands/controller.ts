@@ -1,4 +1,4 @@
-import { agentCommands, db, deploymentEvents, workloads } from "@repo/db";
+import { agentCommands, db, deploymentEvents, nodePortReservations, workloads } from "@repo/db";
 import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import type { Logger } from "pino";
 import { refreshDeploymentStatus } from "../deployments/service.js";
@@ -36,6 +36,7 @@ export function startCommandTimeoutController(logger: Logger, intervalMs = 15_00
         const actualState = command.type === "workload.start" ? "failed" : "unknown";
         await db.transaction(async (tx) => {
           await tx.update(workloads).set({ actualState, healthMessage: "Agent command timed out", lastReportedAt: now }).where(eq(workloads.id, workload.id));
+          if (command.type === "workload.start") await tx.update(nodePortReservations).set({ status: "released", releasedAt: now }).where(and(eq(nodePortReservations.workloadId, workload.id), eq(nodePortReservations.status, "reserved")));
           await tx.insert(deploymentEvents).values({
             id: crypto.randomUUID(), deploymentId: workload.deploymentId, workloadId: workload.id, nodeId: workload.nodeId,
             type: "workload.command_timed_out", message: `Agent command ${command.type} timed out`, reason: "COMMAND_TIMEOUT",
