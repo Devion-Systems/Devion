@@ -7,6 +7,9 @@ import {
   HeadObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
+  type GetObjectCommandOutput,
+  type HeadObjectCommandOutput,
+  type ListObjectsV2CommandOutput,
   type PutObjectCommandInput,
 } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
@@ -18,6 +21,8 @@ export interface MultiTenantStorageConfig {
   s3Client: S3Client;
   defaultBucketPrefix?: string;
   autoCreateBuckets?: boolean;
+  /** Whole-request timeout. Defaults to 60 seconds. */
+  requestTimeoutMs?: number;
 }
 
 export interface StorageObjectMetadata {
@@ -39,11 +44,15 @@ export class BlobStorageClient {
   private s3: S3Client;
   private defaultBucketPrefix: string;
   private autoCreateBuckets: boolean;
+  private requestTimeoutMs: number;
+  private knownBuckets = new Map<string, number>();
+  private pendingBucketChecks = new Map<string, Promise<void>>();
 
   constructor(config: MultiTenantStorageConfig) {
     this.s3 = config.s3Client;
     this.defaultBucketPrefix = config.defaultBucketPrefix || "devion";
     this.autoCreateBuckets = config.autoCreateBuckets ?? true;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? 60_000;
   }
 
   private getLogger() {
@@ -55,13 +64,42 @@ export class BlobStorageClient {
   }
 
   public getBucketName(tenantId: string, artifactType: ArtifactType): string {
-    const cleanTenant = tenantId.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    return `${this.defaultBucketPrefix}-${cleanTenant}-${artifactType}`;
+    // Lossy normalization previously aliased distinct tenant IDs (A/a, a_b/a-b).
+    // Preserve existing canonical bucket names; ambiguous IDs need an explicit
+    // storage migration rather than silently opening another tenant's bucket.
+    const bucket = `${this.defaultBucketPrefix}-${tenantId}-${artifactType}`;
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantId) ||
+        !["zips", "backups", "logs", "builds", "assets"].includes(artifactType) ||
+        !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) {
+      throw new AppError("Storage requires an unambiguous canonical tenant ID and bucket name", ErrorCode.VALIDATION_ERROR, 400);
+    }
+    return bucket;
+  }
+
+  /** Always contacts storage; provisioning cache must not mask an outage. */
+  public async checkBucket(bucket: string): Promise<void> {
+    await this.send(new HeadBucketCommand({ Bucket: bucket }));
   }
 
   public async ensureBucketExists(bucket: string): Promise<void> {
+    if ((this.knownBuckets.get(bucket) ?? 0) > Date.now()) return;
+    const pending = this.pendingBucketChecks.get(bucket);
+    if (pending) return pending;
+
+    const ensure = this.ensureBucketExistsUncached(bucket);
+    this.pendingBucketChecks.set(bucket, ensure);
     try {
-      await this.s3.send(new HeadBucketCommand({ Bucket: bucket }));
+      await ensure;
+      if (this.knownBuckets.size >= 1000) this.knownBuckets.delete(this.knownBuckets.keys().next().value!);
+      this.knownBuckets.set(bucket, Date.now() + 60_000);
+    } finally {
+      this.pendingBucketChecks.delete(bucket);
+    }
+  }
+
+  private async ensureBucketExistsUncached(bucket: string): Promise<void> {
+    try {
+      await this.send(new HeadBucketCommand({ Bucket: bucket }));
     } catch (err: any) {
       if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
         if (!this.autoCreateBuckets) {
@@ -73,12 +111,19 @@ export class BlobStorageClient {
         }
         this.getLogger()?.info({ bucket }, `Creating Blob bucket: ${bucket}`);
         try {
-          await this.s3.send(new CreateBucketCommand({ Bucket: bucket }));
+          await this.send(new CreateBucketCommand({ Bucket: bucket }));
         } catch (createErr) {
+          // A second API worker may have created the bucket between HEAD and
+          // CREATE. Confirm its existence instead of treating that race as a
+          // failed upload; do not mask unrelated create failures.
+          if (isBucketConflict(createErr)) {
+            await this.send(new HeadBucketCommand({ Bucket: bucket }));
+            return;
+          }
           throw new AppError(
             `Failed to create Blob bucket '${bucket}'`,
-            ErrorCode.INTERNAL_ERROR,
-            500,
+            ErrorCode.SERVICE_UNAVAILABLE,
+            503,
             { cause: createErr, details: { bucket } }
           );
         }
@@ -91,6 +136,15 @@ export class BlobStorageClient {
         );
       }
     }
+  }
+
+  // The AWS SDK command overloads are intentionally operation-specific and
+  // cannot be represented as one generic command union without losing their
+  // output type. Keep that SDK boundary local to this adapter.
+  private send<T = void>(command: unknown): Promise<T> {
+    return this.s3.send(command as never, {
+      abortSignal: AbortSignal.timeout(this.requestTimeoutMs),
+    }) as Promise<T>;
   }
 
   public async upload(
@@ -114,18 +168,19 @@ export class BlobStorageClient {
       Body: body,
       ContentType: options.contentType || this.detectContentType(filePath, artifactType),
       Metadata: {
+        ...options.metadata,
         tenantId,
         artifactType,
         uploadedAt: new Date().toISOString(),
-        ...options.metadata,
       },
     };
 
     try {
-      await this.s3.send(new PutObjectCommand(commandInput));
+      await this.send(new PutObjectCommand(commandInput));
       this.getLogger()?.info({ tenantId, artifactType, filePath, bucket }, `Uploaded artifact to Blob storage`);
       return { bucket, key: filePath };
     } catch (err) {
+      this.knownBuckets.delete(bucket);
       throw new AppError(
         `Failed to upload object '${filePath}' for tenant '${tenantId}' to Blob storage`,
         ErrorCode.INTERNAL_ERROR,
@@ -143,7 +198,7 @@ export class BlobStorageClient {
     const bucket = this.getBucketName(tenantId, artifactType);
 
     try {
-      const response = await this.s3.send(
+      const response = await this.send<GetObjectCommandOutput>(
         new GetObjectCommand({
           Bucket: bucket,
           Key: filePath,
@@ -189,7 +244,7 @@ export class BlobStorageClient {
     const bucket = this.getBucketName(tenantId, artifactType);
 
     try {
-      const res = await this.s3.send(
+      const res = await this.send<HeadObjectCommandOutput>(
         new HeadObjectCommand({
           Bucket: bucket,
           Key: filePath,
@@ -230,7 +285,7 @@ export class BlobStorageClient {
     const bucket = this.getBucketName(tenantId, artifactType);
 
     try {
-      await this.s3.send(
+      await this.send(
         new DeleteObjectCommand({
           Bucket: bucket,
           Key: filePath,
@@ -255,7 +310,7 @@ export class BlobStorageClient {
     const bucket = this.getBucketName(tenantId, artifactType);
 
     try {
-      const response = await this.s3.send(
+      const response = await this.send<ListObjectsV2CommandOutput>(
         new ListObjectsV2Command({
           Bucket: bucket,
           Prefix: prefix,
@@ -299,4 +354,10 @@ export class BlobStorageClient {
         return "application/octet-stream";
     }
   }
+}
+
+function isBucketConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return value.$metadata?.httpStatusCode === 409 || value.name === "BucketAlreadyExists" || value.name === "BucketAlreadyOwnedByYou";
 }

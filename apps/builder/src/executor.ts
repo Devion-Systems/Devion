@@ -23,6 +23,7 @@ export class WorkflowExecutor {
       const cloneUrl = authenticatedUrl(run.source.repository, run.secrets.GIT_TOKEN);
       const clone = await runProcess(["git", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "http.followRedirects=false", "clone", "--depth", "1", "--branch", run.source.ref, cloneUrl, workspace], { cwd: this.options.workdir, signal, onStdout: (line) => void log(null, "stdout", line), onStderr: (line) => void log(null, "stderr", line) });
       if (clone.exitCode !== 0) throw new Error(`Git checkout failed with code ${clone.exitCode}`);
+      await removeCheckoutCredentials(workspace, run.source.repository, signal);
       const revision = await runProcess(["git", "rev-parse", "HEAD"], { cwd: workspace, signal });
       if (revision.exitCode !== 0) throw new Error("Unable to resolve Git commit");
       const resolvedCommit = revision.stdout.trim();
@@ -120,6 +121,15 @@ export class WorkflowExecutor {
     const result = await runProcess([step.shell, "-euc", interpolate(step.run, context)], { cwd: safePath(workspace, step.workingDirectory), env, signal, onStdout: (line) => void log(step.id, "stdout", line), onStderr: (line) => void log(step.id, "stderr", line) });
     if (result.exitCode !== 0) throw new Error(`Command exited with code ${result.exitCode}`);
   }
+}
+
+/** Git clone persists its authenticated URL in .git/config, inside COPY . . */
+export async function removeCheckoutCredentials(workspace: string, repository: string, signal?: AbortSignal): Promise<void> {
+  const clean = new URL(repository);
+  clean.username = "";
+  clean.password = "";
+  const result = await runProcess(["git", "remote", "set-url", "origin", clean.toString()], { cwd: workspace, signal });
+  if (result.exitCode !== 0) throw new Error("Unable to remove Git credentials from checkout");
 }
 
 function conditionMatches(value: string | undefined, outcomes: Map<string, Outcome>): boolean {

@@ -234,6 +234,8 @@ Das Modul validiert alle Umgebungsvariablen automatisch über `@repo/core`.
 | `S3_ACCESS_KEY` | Blob S3 Access Key | `onprem_access_key` |
 | `S3_SECRET_KEY` | Blob S3 Secret Key | `onprem_secret_key...` |
 | `S3_REGION` | S3 Region | `auto` |
+| `S3_REQUEST_TIMEOUT_MS` | Maximum duration of one RustFS/S3 request | `60000` |
+| `S3_MAX_ATTEMPTS` | Maximum AWS SDK attempts for retryable S3 failures | `3` |
 | `DOCKER_REGISTRY_URL` | Private Docker Registry URL | `http://localhost:5000` |
 | `DOCKER_REGISTRY_USERNAME` | Registry HTTP Basic Auth User | *optional* |
 | `DOCKER_REGISTRY_PASSWORD` | Registry HTTP Basic Auth Password | *optional* |

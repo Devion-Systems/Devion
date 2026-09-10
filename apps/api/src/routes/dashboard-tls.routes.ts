@@ -10,7 +10,7 @@ const certificates = new DashboardCertificateManager();
 const dashboardTlsRoutes = new Hono<AppEnv>();
 
 dashboardTlsRoutes.use("/*", requirePlatformAdmin);
-dashboardTlsRoutes.use("/*", bodyLimit({ maxSize: MAX_UPLOAD_BYTES }));
+dashboardTlsRoutes.use("/*", bodyLimit({ maxSize: MAX_UPLOAD_BYTES, onError: (c) => c.json({ error: "Certificate upload is too large" }, 413) }));
 
 dashboardTlsRoutes.get("/certificate", async (c) => c.json(await certificates.getStatus()));
 

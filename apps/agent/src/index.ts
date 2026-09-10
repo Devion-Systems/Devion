@@ -5,6 +5,7 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { ContainerRuntime } from "./runtime/container-runtime.js";
 import { volumeMountsPayload } from "./runtime/volume-policy.js";
+import { sendBatches } from "./batches.js";
 
 const config = loadConfig();
 const identityPath = join(config.DEVION_AGENT_DATA_DIR, "identity.json");
@@ -220,8 +221,10 @@ async function reportWorkloadTelemetry(identity: z.infer<typeof identitySchema>,
     const inspection = await runtime.inspect(workloadId);
     return { workloadId, reportGeneration, actualState: inspection.actualState, healthStatus: inspection.healthStatus, observedAt: new Date().toISOString(), ...(inspection.healthMessage ? { healthMessage: inspection.healthMessage } : {}), ...(includePorts ? { ports: inspection.ports } : {}) };
   });
-  const accepted = await apiFetch(new URL("/api/agents/workloads/telemetry", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ reports }) });
-  if (!accepted.ok) throw new Error(`Workload telemetry report failed: ${accepted.status}`);
+  await sendBatches(reports, async batch => {
+    const accepted = await apiFetch(new URL("/api/agents/workloads/telemetry", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ reports: batch }) });
+    if (!accepted.ok) throw new Error(`Workload telemetry report failed: ${accepted.status}`);
+  });
   if (includePorts) lastPortReportAt = Date.now();
 }
 
@@ -248,8 +251,10 @@ async function reportWorkloadMetrics(identity: z.infer<typeof identitySchema>, a
     lastMetricsReportAt = Date.now();
     return;
   }
-  const accepted = await apiFetch(new URL("/api/agents/workloads/metrics", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ samples }) });
-  if (!accepted.ok) throw new Error(`Workload metrics report failed: ${accepted.status}`);
+  await sendBatches(samples, async batch => {
+    const accepted = await apiFetch(new URL("/api/agents/workloads/metrics", config.DEVION_API_URL), { method: "POST", headers: { authorization: `Bearer ${identity.agentToken}`, "content-type": "application/json" }, body: JSON.stringify({ samples: batch }) });
+    if (!accepted.ok) throw new Error(`Workload metrics report failed: ${accepted.status}`);
+  });
   lastMetricsReportAt = Date.now();
 }
 

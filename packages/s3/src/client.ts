@@ -1,5 +1,8 @@
 import { s3 } from "./connection.js";
 import { BlobStorageClient } from "./blob-client.js";
+import { parseEnv } from "@repo/core";
+
+const env = parseEnv();
 
 export * from "./connection.js";
 export * from "./blob-client.js";
@@ -8,6 +11,7 @@ export const blobStorage = new BlobStorageClient({
   s3Client: s3,
   defaultBucketPrefix: process.env.S3_BUCKET_PREFIX || "devion",
   autoCreateBuckets: true,
+  requestTimeoutMs: env.S3_REQUEST_TIMEOUT_MS,
 });
 
 export async function uploadFile(bucket: string, key: string, data: string | Buffer) {

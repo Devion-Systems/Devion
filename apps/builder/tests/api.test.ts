@@ -73,4 +73,13 @@ describe("builder API", () => {
     });
     expect(response.status).toBe(422);
   });
+
+  test("rejects oversized Builder API bodies before JSON parsing", async () => {
+    const response = await createApp(new MemoryRepository(), token).request("/v1/runs", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "x".repeat(1_024 * 1_024 + 1),
+    });
+    expect(response.status).toBe(413);
+  });
 });

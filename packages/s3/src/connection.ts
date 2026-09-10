@@ -8,6 +8,9 @@ export function createS3Client(): S3Client {
     region: env.S3_REGION,
     endpoint: env.S3_ENDPOINT,
     forcePathStyle: true,
+    // RustFS is an internal dependency. A bounded retry budget handles short
+    // restarts without turning a broad storage outage into unbounded pressure.
+    maxAttempts: env.S3_MAX_ATTEMPTS,
     credentials: {
       accessKeyId: env.S3_ACCESS_KEY,
       secretAccessKey: env.S3_SECRET_KEY,

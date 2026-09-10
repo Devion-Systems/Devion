@@ -1,8 +1,8 @@
-import { mkdir, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { WorkflowStep } from "./domain.ts";
 import { runProcess } from "./process.ts";
 import { interpolate } from "./workflow.ts";
+import { withBuildSecrets } from "./build-secrets.ts";
 
 type BuildStep = Extract<WorkflowStep, { build: unknown }>;
 
@@ -25,28 +25,17 @@ export async function executeBuildKit(
   for (const cache of step.build.cacheFrom) args.push("--import-cache", interpolate(cache, options.context));
   if (step.build.cacheTo) args.push("--export-cache", interpolate(step.build.cacheTo, options.context));
 
-  const secretDirectory = resolve(options.workspace, ".devion-secrets");
-  await mkdir(secretDirectory, { recursive: true, mode: 0o700 });
-  for (const [id, secretName] of Object.entries(step.build.secrets)) {
-    const value = options.secrets[secretName];
-    if (value === undefined) throw new Error(`Missing secret: ${secretName}`);
-    const file = resolve(secretDirectory, id);
-    await Bun.write(file, value, { mode: 0o600 });
-    args.push("--secret", `id=${id},src=${file}`);
-  }
   const tags = step.build.tags.map((tag) => interpolate(tag, options.context));
   args.push("--output", step.build.push ? `type=image,name=${tags.join(",")},push=true${step.build.insecureRegistry ? ",registry.insecure=true" : ""}` : "type=oci,dest=image.tar");
-  try {
-    const result = await runProcess(args, { cwd: options.workspace, signal: options.signal, onStdout: (line) => options.log("stdout", line), onStderr: (line) => options.log("stderr", line) });
+  return withBuildSecrets(step.build.secrets, options.secrets, async (secretArgs) => {
+    const result = await runProcess([...args, ...secretArgs], { cwd: options.workspace, signal: options.signal, onStdout: (line) => options.log("stdout", line), onStderr: (line) => options.log("stderr", line) });
     if (result.exitCode !== 0) throw new Error(`BuildKit exited with code ${result.exitCode}`);
     const metadata = await Bun.file(metadataFile).json().catch(() => ({})) as Record<string, unknown>;
     const digest = metadata["containerimage.digest"];
     return typeof digest === "string" && /^sha256:[a-f0-9]{64}$/.test(digest)
       ? { tags, digest }
       : { tags };
-  } finally {
-    await rm(secretDirectory, { recursive: true, force: true });
-  }
+  });
 }
 
 export function safePath(workspace: string, value: string): string {

@@ -45,6 +45,7 @@ analyticsRoutes.get("/overview", async (c) => {
   let storage = "ok" as "ok" | "error";
   try {
     await blobStorage.ensureBucketExists("devion-health-check");
+    await blobStorage.checkBucket("devion-health-check");
   } catch {
     storage = "error";
   }

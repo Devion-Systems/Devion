@@ -900,7 +900,7 @@ routes.post("/:orgSlug/projects/:projectId/applications/:applicationId/deploy", 
   };
   if (configuredVolumes.some((volume) => !volume.readOnly) && (parsed.data.replicas ?? runtimeDefaults?.replicas ?? 1) > 1)
     return c.json({ error: "Writable local volumes require a single replica until shared storage is configured" }, 409);
-  const ports = configuredPorts.length ? configuredPorts : [{ internalPort: application.internalPort, protocol: "tcp" as const, exposure: "private" as const, externalPort: null }];
+  const ports = configuredPorts.length ? configuredPorts : [{ internalPort: application.internalPort, protocol: "tcp" as const, exposure: "private" as const, requestedHostPort: null, externalPort: null }];
   const runtimeConfig = {
     environment,
     ports: ports.map((port) => ({ containerPort: port.internalPort, protocol: port.protocol, exposure: port.exposure, ...((port.requestedHostPort ?? port.externalPort) ? { requestedHostPort: port.requestedHostPort ?? port.externalPort } : {}) })),

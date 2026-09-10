@@ -1,5 +1,8 @@
 import http from "node:http";
 
+const MAX_DOCKER_JSON_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_DOCKER_RAW_RESPONSE_BYTES = 1024 * 1024;
+
 export interface ContainerStartSpec {
   workloadId: string;
   image: string;
@@ -36,7 +39,9 @@ export class ContainerRuntime {
     } catch (error) {
       if (!(error instanceof Error) || !error.message.startsWith("Docker API 404:")) throw error;
     }
-    await this.request("POST", `/images/create?fromImage=${encodeURIComponent(spec.image)}`, undefined, registryAuthHeaders(spec.image, spec.registryCredentials));
+    // Docker returns a progress stream for pulls. It is not used by the agent,
+    // so discard it instead of retaining an unbounded response in memory.
+    await this.request("POST", `/images/create?fromImage=${encodeURIComponent(spec.image)}`, undefined, registryAuthHeaders(spec.image, spec.registryCredentials), { discardResponse: true });
     const exposedPorts = Object.fromEntries(
       (spec.ports ?? []).map((port) => [`${port.containerPort}/${port.protocol ?? "tcp"}`, {}]),
     );
@@ -224,7 +229,13 @@ export class ContainerRuntime {
     }
   }
 
-  private request<T = void>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+  private request<T = void>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+    options: { discardResponse?: boolean; maxResponseBytes?: number } = {},
+  ): Promise<T> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
       const request = http.request(
@@ -237,21 +248,40 @@ export class ContainerRuntime {
         },
         (response) => {
           let output = "";
+          let outputBytes = 0;
+          let settled = false;
+          const maxResponseBytes = options.maxResponseBytes ?? MAX_DOCKER_JSON_RESPONSE_BYTES;
+          const fail = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+          };
           response.setEncoding("utf8");
           response.on("data", (chunk) => {
+            if (options.discardResponse && (response.statusCode ?? 500) < 300) return;
+            outputBytes += Buffer.byteLength(chunk);
+            if (outputBytes > maxResponseBytes) {
+              response.destroy();
+              fail(new Error(`Docker API response exceeded ${maxResponseBytes} byte limit`));
+              return;
+            }
             output += chunk;
           });
           response.on("end", () => {
+            if (settled) return;
             if ((response.statusCode ?? 500) >= 300)
-              return reject(
+              return fail(
                 new Error(`Docker API ${response.statusCode}: ${output || "request failed"}`),
               );
             try {
+              settled = true;
               resolve((output ? JSON.parse(output) : undefined) as T);
             } catch {
+              settled = true;
               resolve(undefined as T);
             }
           });
+          response.on("error", fail);
         },
       );
       request.on("error", reject);
@@ -284,13 +314,32 @@ export class ContainerRuntime {
         },
         (response) => {
           const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+          let outputBytes = 0;
+          let settled = false;
+          const fail = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+          };
+          response.on("data", (chunk: Buffer | string) => {
+            const buffer = Buffer.from(chunk);
+            outputBytes += buffer.length;
+            if (outputBytes > MAX_DOCKER_RAW_RESPONSE_BYTES) {
+              response.destroy();
+              fail(new Error(`Docker API response exceeded ${MAX_DOCKER_RAW_RESPONSE_BYTES} byte limit`));
+              return;
+            }
+            chunks.push(buffer);
+          });
           response.on("end", () => {
+            if (settled) return;
             const output = Buffer.concat(chunks);
             if ((response.statusCode ?? 500) >= 300)
-              return reject(new Error(`Docker API ${response.statusCode}: ${output.toString("utf8") || "request failed"}`));
+              return fail(new Error(`Docker API ${response.statusCode}: ${output.toString("utf8") || "request failed"}`));
+            settled = true;
             resolve(output);
           });
+          response.on("error", fail);
         },
       );
       request.on("error", reject);

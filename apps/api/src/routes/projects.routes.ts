@@ -10,6 +10,7 @@ import { resolveWorkloadUpstreams } from "../features/routing/workload-upstreams
 import { requireAuthenticatedUser } from "../middleware/auth.js";
 import { listAccessibleProjects, resolveProjectAccess } from "../features/projects/access.js";
 import type { AppEnv } from "../types/env.js";
+import { listProjectPage, projectListQuery } from "../features/projects/list-page.js";
 
 const projectInputSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -172,24 +173,17 @@ projectRoutes.get("/:orgSlug", async (c) => {
 });
 
 projectRoutes.get("/:orgSlug/projects", async (c) => {
-  const access = await listAccessibleProjects(c.req.raw, c.req.param("orgSlug"));
-  if (!access) return c.json({ error: "Organization not found or access denied" }, 404);
-  const query = c.req.query();
-  const status = query.status === "active" || query.status === "archived" ? query.status : undefined;
-  const search = query.search?.trim().toLowerCase();
-  const teamId = query.teamId;
-  const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit ?? "25", 10) || 25));
-  const projectIds = access.projects.map((project) => project.id);
+  const access = await getAuthorizedOrganization(c.req.raw, c.req.param("orgSlug"));
+  if (!access || !access.permissions.includes("projects.read")) return c.json({ error: "Organization not found or access denied" }, 404);
+  const parsed = projectListQuery.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: "Invalid project list query" }, 400);
+  const { page, limit } = parsed.data;
+  const result = await listProjectPage(access.organization.id, access.userId, access.membership.role, parsed.data);
+  const pageProjects = result.items;
+  const projectIds = pageProjects.map((project) => project.id);
   const assignments = projectIds.length
     ? await db.select().from(projectTeams).where(inArray(projectTeams.projectId, projectIds))
     : [];
-  const filtered = access.projects
-    .filter((project) => !status || project.status === status)
-    .filter((project) => !search || [project.name, project.slug, project.description ?? ""].some((value) => value.toLowerCase().includes(search)))
-    .filter((project) => !teamId || assignments.some((assignment) => assignment.projectId === project.id && assignment.teamId === teamId))
-    .sort((a, b) => query.sort === "name" ? a.name.localeCompare(b.name) : query.sort === "created" ? b.createdAt.getTime() - a.createdAt.getTime() : b.updatedAt.getTime() - a.updatedAt.getTime());
-  const pageProjects = filtered.slice((page - 1) * limit, page * limit);
   const pageProjectIds = pageProjects.map((project) => project.id);
   const [applicationCounts, environmentCounts, domainCounts] = pageProjectIds.length ? await Promise.all([
     db.select({ projectId: applications.projectId, total: count() }).from(applications).where(inArray(applications.projectId, pageProjectIds)).groupBy(applications.projectId),
@@ -205,7 +199,7 @@ projectRoutes.get("/:orgSlug/projects", async (c) => {
     domainCount: domainCounts.find((item) => item.projectId === project.id)?.total ?? 0,
     createdAt: project.createdAt, updatedAt: project.updatedAt,
   }));
-  return c.json({ items, page, limit, total: filtered.length });
+  return c.json({ items, page, limit, total: result.total });
 });
 
 /** Actual organization overview data. Deployment history is intentionally not inferred until a deployment runtime records it. */

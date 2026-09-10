@@ -6,6 +6,7 @@ import type { RequestId } from "@repo/core";
  * across all routes and middleware.
  */
 export type AppEnv = {
+  Bindings: { clientIp?: string };
   Variables: {
     requestId: RequestId;
     logger: Logger;

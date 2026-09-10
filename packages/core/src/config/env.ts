@@ -18,6 +18,11 @@ const coreEnvSchema = z.object({
   S3_ACCESS_KEY: z.string().default("onprem_access_key"),
   S3_SECRET_KEY: z.string().default("onprem_secret_key_must_be_long"),
   S3_REGION: z.string().default("auto"),
+  // S3-compatible services can otherwise leave an API worker waiting on a
+  // stalled socket indefinitely. Uploads may be large, so this is a whole
+  // request limit rather than an aggressively short connect timeout.
+  S3_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(10 * 60_000).default(60_000),
+  S3_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
   BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET muss mindestens 32 Zeichen lang sein"),
   BETTER_AUTH_URL: z.string().url("BETTER_AUTH_URL muss eine gültige URL sein"),
   DASHBOARD_URL: z.string().url().optional(),

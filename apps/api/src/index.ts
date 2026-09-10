@@ -43,7 +43,7 @@ const rateLimits = createDevionRateLimiters(new PostgresStore(getDbPool()));
 
 // --- Global middleware (order matters) ---
 app.use("*", corsMiddleware());
-app.use("*", bodyLimit({ maxSize: 10 * 1024 * 1024 }));
+app.use("*", bodyLimit({ maxSize: 10 * 1024 * 1024, onError: (c) => c.json({ error: "Request body too large" }, 413) }));
 app.use("*", requestIdMiddleware());
 app.use("*", requestLoggerMiddleware());
 app.use("*", securityHeadersMiddleware());
@@ -118,5 +118,6 @@ process.on("SIGINT", shutdown);
 
 export default {
   port,
-  fetch: app.fetch,
+  fetch: (request: Request, server: { requestIP(request: Request): { address: string } | null }) =>
+    app.fetch(request, { clientIp: server.requestIP(request)?.address }),
 };

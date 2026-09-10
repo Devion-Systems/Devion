@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
+import { isIP } from "node:net";
 interface OrganizationAuth {
   api: {
     verifyApiKey(input: { body: { key: string } }): Promise<{
@@ -160,9 +161,14 @@ export function resolveOrgContext(authInstance: OrganizationAuth): MiddlewareHan
 }
 
 function clientIp(c: Context): string {
-  return (
-    c.req.header("x-real-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
-  );
+  const peer = c.env?.clientIp;
+  // Enable only behind an exclusive trusted ingress which overwrites this
+  // header. Never interpret arbitrary X-Forwarded-For chains as identities.
+  if (process.env.DEVION_TRUST_PROXY === "true") {
+    const forwarded = c.req.header("x-real-ip");
+    if (forwarded && isIP(forwarded)) return forwarded;
+  }
+  return typeof peer === "string" && isIP(peer) ? peer : "unknown";
 }
 
 function defaultKeyGenerator(c: Context): string {

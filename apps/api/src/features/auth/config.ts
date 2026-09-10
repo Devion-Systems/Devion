@@ -18,6 +18,7 @@ import {
   twoFactor,
 } from "better-auth/plugins";
 import { sendEmail } from "../email/index.js";
+import { sessionPolicy } from "./session-policy.js";
 
 const env = parseEnv();
 const emailVerificationEnabled = Boolean(env.SMTP_HOST && env.SMTP_FROM);
@@ -151,7 +152,7 @@ export const auth: any = betterAuth({
         }
       : {}),
   },
-  session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
+  session: sessionPolicy,
   plugins: [
     apiKey({
       enableSessionForAPIKeys: true,

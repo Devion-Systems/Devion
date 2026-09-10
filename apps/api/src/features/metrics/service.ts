@@ -13,11 +13,17 @@ export function aggregateWorkloadMetrics(samples: WorkloadMetricSample[], bucket
   }
   for (const sample of samples) {
     const key = Math.floor(sample.recordedAt.getTime() / bucketMs) * bucketMs;
-    buckets.set(key, [...(buckets.get(key) ?? []), sample]);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(sample);
+    else buckets.set(key, [sample]);
   }
   return [...buckets.entries()].sort(([a], [b]) => a - b).map(([timestamp, values]) => {
     const byWorkload = new Map<string, WorkloadMetricSample[]>();
-    for (const value of values) byWorkload.set(value.workloadId, [...(byWorkload.get(value.workloadId) ?? []), value]);
+    for (const value of values) {
+      const series = byWorkload.get(value.workloadId);
+      if (series) series.push(value);
+      else byWorkload.set(value.workloadId, [value]);
+    }
     const series = [...byWorkload.values()];
     // First aggregate within a workload, then across workloads. This keeps a
     // fast-reporting replica from biasing the application-level figures.

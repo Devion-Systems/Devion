@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { z } from "zod";
@@ -16,6 +17,10 @@ const createRunSchema = z.object({
 export function createApp(repository: RunRepository, apiToken: string, corsOrigins: string[] = []) {
   const app = new Hono();
   app.use(logger());
+  // Workflows and encrypted secrets are small control-plane payloads. Reject
+  // oversized bodies before JSON parsing so a token holder cannot exhaust a
+  // Builder worker's memory with one request.
+  app.use("/v1/*", bodyLimit({ maxSize: 1 * 1024 * 1024, onError: (c) => c.json({ error: "Request body too large" }, 413) }));
   if (corsOrigins.length) app.use("/v1/*", cors({ origin: corsOrigins }));
   app.get("/health/live", (c) => c.json({ status: "ok" }));
   app.get("/health/ready", async (c) => {

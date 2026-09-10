@@ -1,0 +1,23 @@
+name: devion-audit-test
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: devion_test
+      POSTGRES_PASSWORD: devion_test_local_only
+      POSTGRES_DB: devion_test
+    ports: ["127.0.0.1:55432:5432"]
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devion_test -d devion_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: devion_test
+      RUSTFS_SECRET_KEY: devion_test_local_only
+    command: ["/data"]
+    ports: ["127.0.0.1:59000:9000"]
+    tmpfs: ["/data:mode=1777", "/logs:mode=1777"]

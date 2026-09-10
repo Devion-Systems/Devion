@@ -14,6 +14,7 @@
     "build": "bun build src/index.ts --format esm --dts --clean",
     "dev": "bun run src/index.ts --format esm --dts --watch",
     "lint": "tsc --noEmit",
+    "test": "bun test",
     "clean": "rm -rf dist .turbo node_modules"
   },
   "dependencies": {

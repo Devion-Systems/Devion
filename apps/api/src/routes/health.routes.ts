@@ -26,6 +26,7 @@ health.get("/detailed", async (c) => {
     let storage: "ok" | "error" = "ok";
     try {
       await blobStorage.ensureBucketExists("devion-health-check");
+      await blobStorage.checkBucket("devion-health-check");
     } catch {
       storage = "error";
     }
