@@ -1,8 +1,0 @@
-.git
-.next
-node_modules
-**/node_modules
-**/.next
-.env
-deploy/docker/.env
-data
